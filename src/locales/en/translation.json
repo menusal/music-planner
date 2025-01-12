@@ -1,0 +1,13 @@
+{
+  "title": "Concert Planner",
+  "playList": "Play List",
+  "dragAndDrop": "Drag and drop MP3 files here",
+  "breakTimeLabel": "Break time between songs:",
+  "seconds": "seconds",
+  "totalDuration": "Total duration:",
+  "noTracks": "No tracks added yet",
+  "copyToClipboard": "Copy to clipboard",
+  "copied": "Copied!",
+  "accumulated": "Accumulated",
+  "clickToEdit": "Click to edit playlist title"
+}

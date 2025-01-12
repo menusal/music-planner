@@ -1,0 +1,13 @@
+{
+  "title": "Planificador de conciertos",
+  "playList": "Lista de reproducción",
+  "dragAndDrop": "Arrastra y suelta archivos MP3 aquí",
+  "breakTimeLabel": "Tiempo de descanso entre canciones:",
+  "seconds": "segundos",
+  "totalDuration": "Duración total:",
+  "noTracks": "Aún no hay canciones añadidas",
+  "copyToClipboard": "Copiar al portapapeles",
+  "copied": "¡Copiado!",
+  "accumulated": "Acumulado",
+  "clickToEdit": "Haz clic para editar el título"
+}
