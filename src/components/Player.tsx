@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   PlayIcon,
   PauseIcon,
@@ -15,12 +15,16 @@ interface PlayerProps {
   currentTrack: Track | null;
   playlist: Track[];
   onTrackChange: (track: Track) => void;
+  shouldAutoPlay?: boolean;
+  onAutoPlayHandled?: () => void;
 }
 
 export default function Player({
   currentTrack,
   playlist,
   onTrackChange,
+  shouldAutoPlay = false,
+  onAutoPlayHandled,
 }: PlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -30,7 +34,6 @@ export default function Player({
   const [prevVolume, setPrevVolume] = useState(1);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [showVolumeControl, setShowVolumeControl] = useState(false);
-  const [audioData, setAudioData] = useState<Uint8Array>(new Uint8Array(0));
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number>();
@@ -46,7 +49,11 @@ export default function Player({
     try {
       if (!audioContextRef.current && audioRef.current) {
         audioContextRef.current = new AudioContext();
-        await audioContextRef.current.resume();
+        
+        // Only resume if context is suspended (requires user interaction)
+        if (audioContextRef.current.state === 'suspended') {
+          await audioContextRef.current.resume();
+        }
 
         analyserRef.current = audioContextRef.current.createAnalyser();
         analyserRef.current.fftSize = 256;
@@ -62,7 +69,7 @@ export default function Player({
         setIsAudioInitialized(true);
       } else if (
         audioContextRef.current &&
-        audioContextRef.current.state !== "running"
+        audioContextRef.current.state === "suspended"
       ) {
         await audioContextRef.current.resume();
       }
@@ -71,52 +78,194 @@ export default function Player({
     }
   };
 
-  // Efecto para manejar el cambio de pista
+  // Mover playNextTrack aquí, antes de los efectos
+  const playNextTrack = useCallback(() => {
+    if (!currentTrack || playlist.length === 0) return;
+
+    const currentIndex = playlist.findIndex(
+      (track) => track.id === currentTrack.id
+    );
+    let nextIndex;
+
+    if (isShuffled) {
+      nextIndex = Math.floor(Math.random() * playlist.length);
+    } else {
+      nextIndex = (currentIndex + 1) % playlist.length;
+    }
+
+    onTrackChange(playlist[nextIndex]);
+    setIsPlaying(true);
+  }, [currentTrack, playlist, isShuffled, onTrackChange]);
+
+  // Track when currentTrack changes
+  const prevTrackRef = useRef<Track | null>(null);
+  const userInteractedRef = useRef(false);
+  
+  // Track user interaction to enable audio playback
   useEffect(() => {
+    const handleUserInteraction = () => {
+      userInteractedRef.current = true;
+    };
+    
+    window.addEventListener('click', handleUserInteraction, { once: true });
+    window.addEventListener('touchstart', handleUserInteraction, { once: true });
+    
+    return () => {
+      window.removeEventListener('click', handleUserInteraction);
+      window.removeEventListener('touchstart', handleUserInteraction);
+    };
+  }, []);
+  
+  useEffect(() => {
+    // If track changed and user has interacted, auto-play
+    if (currentTrack && currentTrack.id !== prevTrackRef.current?.id) {
+      prevTrackRef.current = currentTrack;
+      // Set isPlaying to true - the effect will handle playback
+      if (userInteractedRef.current || shouldAutoPlay) {
+        setIsPlaying(true);
+        if (shouldAutoPlay && onAutoPlayHandled) {
+          onAutoPlayHandled();
+        }
+      }
+    }
+  }, [currentTrack, shouldAutoPlay, onAutoPlayHandled]);
+
+  // Efecto para manejar el cambio de pista y la reproducción
+  useEffect(() => {
+    let isSubscribed = true;
+
     const playTrack = async () => {
-      if (currentTrack && audioRef.current) {
-        try {
-          await initializeAudio(); // Inicializar audio cuando cambia la pista
-          audioRef.current.src = currentTrack.url;
-          if (isPlaying) {
-            await audioRef.current.play();
+      if (!audioRef.current) return;
+
+      try {
+        // Solo inicializamos si es necesario
+        if (!isAudioInitialized) {
+          await initializeAudio();
+        }
+
+        // Si no hay currentTrack pero hay playlist, comenzar con la primera canción
+        if (!currentTrack && playlist.length > 0) {
+          onTrackChange(playlist[0]);
+          return; // Salimos y dejamos que el efecto se ejecute de nuevo con la nueva pista
+        }
+
+        // Solo actualizamos la fuente si ha cambiado la pista o la URL
+        if (currentTrack && currentTrack.url) {
+          const currentSrc = audioRef.current.src || '';
+          const trackUrl = currentTrack.url;
+          
+          // Check if URL has changed - compare the actual URLs
+          // Handle blob URLs and regular URLs
+          const urlChanged = !currentSrc || currentSrc !== trackUrl;
+          
+          if (urlChanged && trackUrl) {
+            // Validate URL before setting
+            try {
+              // Test if URL is valid
+              if (trackUrl.startsWith('blob:') || trackUrl.startsWith('http://') || trackUrl.startsWith('https://')) {
+                audioRef.current.src = trackUrl;
+                
+                // Add error handler for audio loading
+                const handleAudioError = (e: Event) => {
+                  console.error('Error loading audio from URL:', trackUrl, e);
+                  if (isSubscribed) {
+                    setIsPlaying(false);
+                  }
+                  // Try to notify user
+                  if (audioRef.current?.error) {
+                    const error = audioRef.current.error;
+                    console.error('Audio error details:', {
+                      code: error.code,
+                      message: error.message,
+                    });
+                  }
+                };
+                
+                audioRef.current.addEventListener('error', handleAudioError, { once: true });
+                
+                // Add loadeddata handler to verify audio loaded successfully
+                const handleLoadedData = () => {
+                  console.log('Audio loaded successfully:', trackUrl);
+                  audioRef.current?.removeEventListener('error', handleAudioError);
+                };
+                
+                audioRef.current.addEventListener('loadeddata', handleLoadedData, { once: true });
+                
+                await audioRef.current.load();
+                
+                // Auto-play if isPlaying is true (set when user clicks track)
+                if (isSubscribed && isPlaying) {
+                  try {
+                    await audioRef.current.play();
+                  } catch (playError) {
+                    console.warn('Auto-play prevented:', playError);
+                    // Reset isPlaying if play fails
+                    if (isSubscribed) {
+                      setIsPlaying(false);
+                    }
+                  }
+                }
+              } else {
+                console.error('Invalid track URL format:', trackUrl);
+              }
+            } catch (error) {
+              console.error('Error setting audio source:', error);
+              if (isSubscribed) {
+                setIsPlaying(false);
+              }
+            }
           }
-        } catch (error) {
-          console.error("Error playing track:", error);
+        }
+
+        // Manejamos la reproducción/pausa
+        if (isPlaying && isSubscribed && currentTrack && audioRef.current.src) {
+          // Resume audio context if needed
+          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+            try {
+              await audioContextRef.current.resume();
+            } catch (error) {
+              console.warn("Could not resume audio context:", error);
+            }
+          }
+          
+          if (audioRef.current.paused) {
+            try {
+              await audioRef.current.play();
+            } catch (error) {
+              console.error("Error playing audio:", error);
+              if (isSubscribed) {
+                setIsPlaying(false);
+              }
+            }
+          }
+        } else {
+          if (!audioRef.current.paused) {
+            audioRef.current.pause();
+          }
+        }
+      } catch (error) {
+        console.error("Error setting up track:", error);
+        if (isSubscribed) {
           setIsPlaying(false);
         }
       }
     };
 
     playTrack();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTrack]);
 
-  // Efecto para manejar la reproducción/pausa
-  useEffect(() => {
-    const togglePlayback = async () => {
-      if (audioRef.current) {
-        if (isPlaying) {
-          try {
-            if (!isAudioInitialized) {
-              await initializeAudio();
-            }
-            await audioRef.current.play();
-          } catch (error) {
-            console.error("Error playing:", error);
-            setIsPlaying(false);
-          }
-        } else {
-          audioRef.current.pause();
-        }
-      }
+    return () => {
+      isSubscribed = false;
     };
+  }, [
+    currentTrack,
+    isPlaying,
+    playlist,
+    onTrackChange,
+    isAudioInitialized,
+    initializeAudio,
+  ]);
 
-    togglePlayback();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying]);
-
-  // Actualizar el tiempo actual y manejar el final de la pista
+  // Ahora los efectos pueden usar playNextTrack
   useEffect(() => {
     if (audioRef.current) {
       const audio = audioRef.current;
@@ -142,8 +291,7 @@ export default function Player({
         audio.removeEventListener("ended", handleEnded);
       };
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRepeating]);
+  }, [isRepeating, playNextTrack]);
 
   // Efecto para manejar cambios en el volumen
   useEffect(() => {
@@ -233,9 +381,27 @@ export default function Player({
 
   const togglePlay = async () => {
     try {
+      // Initialize audio on user interaction (play button click)
       if (!isAudioInitialized) {
         await initializeAudio();
       }
+      
+      // Si no hay currentTrack pero hay playlist, comenzar con la primera canción
+      if (!currentTrack && playlist.length > 0) {
+        onTrackChange(playlist[0]);
+        setIsPlaying(true);
+        return;
+      }
+      
+      if (!currentTrack) {
+        return;
+      }
+      
+      // Resume audio context if suspended (required for user interaction)
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+      
       setIsPlaying(!isPlaying);
     } catch (error) {
       console.error("Error in togglePlay:", error);
@@ -247,23 +413,6 @@ export default function Player({
       audioRef.current.currentTime = newTime;
       setCurrentTime(newTime);
     }
-  };
-
-  const playNextTrack = () => {
-    if (!currentTrack || playlist.length === 0) return;
-
-    const currentIndex = playlist.findIndex(
-      (track) => track.id === currentTrack.id
-    );
-    let nextIndex;
-
-    if (isShuffled) {
-      nextIndex = Math.floor(Math.random() * playlist.length);
-    } else {
-      nextIndex = (currentIndex + 1) % playlist.length;
-    }
-
-    onTrackChange(playlist[nextIndex]);
   };
 
   const playPreviousTrack = () => {
@@ -282,6 +431,7 @@ export default function Player({
     }
 
     onTrackChange(playlist[previousIndex]);
+    setIsPlaying(true);
   };
 
   const formatTime = (time: number) => {
@@ -322,9 +472,10 @@ export default function Player({
     });
   };
 
+  // Always render the player container, but show content only when track is available
   return (
-    <div className="h-auto bg-gray-800 border-t border-gray-700 px-4 py-3 flex flex-col">
-      {currentTrack && (
+    <div className="h-auto bg-gray-800 border-t border-gray-700 px-4 py-3 flex flex-col min-h-[120px]">
+      {currentTrack ? (
         <div className="flex flex-col space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-sm truncate">
@@ -487,6 +638,10 @@ export default function Player({
               </span>
             </div>
           </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-center h-12 text-gray-500 text-sm">
+          Select a track to play
         </div>
       )}
       <audio ref={audioRef} />

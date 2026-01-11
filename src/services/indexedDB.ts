@@ -1,22 +1,28 @@
 const DB_NAME = "musicPlayerDB";
-const DB_VERSION = 1;
+const DB_VERSION = 3; // Incremented to add order field
 const STORE_NAME = "tracks";
+const QUEUE_STORE_NAME = "syncQueue";
 
-interface DBTrack {
+export interface DBTrack {
   id: string;
   title: string;
   duration: number;
   artist?: string;
   fileBlob: Blob;
+  order?: number; // Order/position of the track in the playlist
+  synced?: boolean;
+  updatedAt?: number;
 }
 
-interface Playlist {
+export interface Playlist {
   id: string;
   title: string;
   tracks: string[]; // Array of track IDs
   breakTime: number;
+  startTime?: string;
   createdAt: number;
   updatedAt: number;
+  synced?: boolean;
 }
 
 export const initDB = (): Promise<IDBDatabase> => {
@@ -28,10 +34,31 @@ export const initDB = (): Promise<IDBDatabase> => {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
+      const oldVersion = event.oldVersion || 0;
+      const transaction = (event.target as IDBOpenDBRequest).transaction;
 
       // Create stores if they don't exist
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: "id" });
+        const trackStore = db.createObjectStore(STORE_NAME, { keyPath: "id" });
+        trackStore.createIndex("synced", "synced", { unique: false });
+        trackStore.createIndex("updatedAt", "updatedAt", { unique: false });
+        trackStore.createIndex("order", "order", { unique: false });
+      } else if (oldVersion < 3 && transaction) {
+        // Add order index to existing store if upgrading from version 2 or earlier
+        // We can't reliably check if index exists during upgrade, so we try to create it
+        // and ignore errors if it already exists
+        try {
+          const trackStore = transaction.objectStore(STORE_NAME);
+          // Try to create the index - if it exists, this will throw, which we'll catch
+          trackStore.createIndex("order", "order", { unique: false });
+        } catch (error: any) {
+          // Index might already exist (error code 0 or ConstraintError)
+          // or there's another issue - log but don't fail the upgrade
+          if (error?.name !== "ConstraintError" && error?.code !== 0) {
+            console.warn("Could not add order index:", error);
+          }
+          // Continue with upgrade even if index creation fails
+        }
       }
 
       // Create playlists store
@@ -43,6 +70,12 @@ export const initDB = (): Promise<IDBDatabase> => {
         // Optionally add indexes if needed
         playlistStore.createIndex("createdAt", "createdAt", { unique: false });
         playlistStore.createIndex("updatedAt", "updatedAt", { unique: false });
+        playlistStore.createIndex("synced", "synced", { unique: false });
+      }
+
+      // Create syncQueue store
+      if (!db.objectStoreNames.contains(QUEUE_STORE_NAME)) {
+        db.createObjectStore(QUEUE_STORE_NAME, { keyPath: "id" });
       }
     };
   });
@@ -53,7 +86,15 @@ export const saveTrack = async (track: DBTrack): Promise<void> => {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_NAME], "readwrite");
     const store = transaction.objectStore(STORE_NAME);
-    const request = store.put(track);
+    
+    // Ensure synced and updatedAt are set
+    const trackToSave = {
+      ...track,
+      synced: track.synced ?? false,
+      updatedAt: track.updatedAt ?? Date.now(),
+    };
+    
+    const request = store.put(trackToSave);
 
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve();
@@ -89,7 +130,16 @@ export const savePlaylists = async (playlist: Playlist): Promise<void> => {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(["playlists"], "readwrite");
     const store = transaction.objectStore("playlists");
-    const request = store.put(playlist);
+    
+    // Ensure synced and updatedAt are set
+    const playlistToSave = {
+      ...playlist,
+      synced: playlist.synced ?? false,
+      updatedAt: playlist.updatedAt ?? Date.now(),
+      createdAt: playlist.createdAt ?? Date.now(),
+    };
+    
+    const request = store.put(playlistToSave);
 
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve();

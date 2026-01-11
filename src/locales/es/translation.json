@@ -6,8 +6,34 @@
   "seconds": "segundos",
   "totalDuration": "Duración total:",
   "noTracks": "Aún no hay canciones añadidas",
-  "copyToClipboard": "Copiar al portapapeles",
+  "copyToClipboard": "Copiar",
   "copied": "¡Copiado!",
   "accumulated": "Acumulado",
-  "clickToEdit": "Haz clic para editar el título"
+  "clickToEdit": "Haz clic para editar el título",
+  "startTimeLabel": "Hora de inicio del concierto:",
+  "noStartTime": "Hora no establecida",
+  "install": {
+    "title": "Instalar Planificador Musical",
+    "description": "Instala la aplicación para una mejor experiencia",
+    "ios_description": "Toca el botón compartir y selecciona \"Añadir a pantalla de inicio\"",
+    "button": "Instalar App",
+    "dismiss": "Descartar"
+  },
+  "update": {
+    "title": "Actualización Disponible",
+    "description": "Una nueva versión de la aplicación está disponible.",
+    "button": "Actualizar Ahora",
+    "dismiss": "Más tarde"
+  },
+  "offline": {
+    "message": "Actualmente estás sin conexión. Algunas funciones pueden estar limitadas."
+  },
+  "sync": {
+    "online": "En línea",
+    "offline": "Sin conexión",
+    "pending": "operaciones pendientes",
+    "syncing": "Sincronizando..."
+  },
+  "refresh": "Actualizar lista",
+  "play": "Reproducir"
 }

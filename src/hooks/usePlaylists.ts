@@ -1,5 +1,8 @@
 import { useState, useCallback } from "react";
 import { Track } from "../types";
+import { syncPlaylistsToFirestore, isOnline } from "../services/syncService";
+import { addToSyncQueue } from "../services/syncQueue";
+import { savePlaylists as savePlaylistToIndexedDB } from "../services/indexedDB";
 
 export interface PlaylistData {
   id: string;
@@ -25,7 +28,7 @@ export function usePlaylists() {
     return [defaultPlaylist];
   });
 
-  const savePlaylist = useCallback((playlistToSave: PlaylistData) => {
+  const savePlaylist = useCallback(async (playlistToSave: PlaylistData) => {
     setPlaylists((currentPlaylists) => {
       const updatedPlaylists = currentPlaylists.map((playlist) =>
         playlist.id === playlistToSave.id ? playlistToSave : playlist
@@ -38,16 +41,70 @@ export function usePlaylists() {
 
       // Guardar en localStorage
       localStorage.setItem("playlists", JSON.stringify(updatedPlaylists));
+      
+      // Also save to IndexedDB for sync
+      const playlistForIndexedDB = {
+        id: playlistToSave.id,
+        title: playlistToSave.title,
+        tracks: playlistToSave.tracks.map((t) => t.id),
+        breakTime: playlistToSave.breakTime,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        synced: false,
+      };
+      
+      savePlaylistToIndexedDB(playlistForIndexedDB).catch((error) => {
+        console.error("Error saving playlist to IndexedDB:", error);
+      });
+      
+      // Sync to Firestore if online, otherwise queue
+      if (isOnline()) {
+        syncPlaylistsToFirestore().catch((error) => {
+          console.error("Error syncing playlist to Firestore:", error);
+        });
+      } else {
+        addToSyncQueue({
+          type: "UPDATE_PLAYLIST",
+          data: playlistForIndexedDB,
+        }).catch((error) => {
+          console.error("Error adding to sync queue:", error);
+        });
+      }
+      
       return updatedPlaylists;
     });
   }, []);
 
-  const deletePlaylist = useCallback((playlistId: string) => {
+  const deletePlaylist = useCallback(async (playlistId: string) => {
     setPlaylists((currentPlaylists) => {
       const updatedPlaylists = currentPlaylists.filter(
         (p) => p.id !== playlistId
       );
       localStorage.setItem("playlists", JSON.stringify(updatedPlaylists));
+      
+      // Delete from IndexedDB
+      import("../services/indexedDB").then(({ deletePlaylist: deletePlaylistFromIndexedDB }) => {
+        deletePlaylistFromIndexedDB(playlistId).catch((error) => {
+          console.error("Error deleting playlist from IndexedDB:", error);
+        });
+      });
+      
+      // Sync deletion to Firestore if online, otherwise queue
+      if (isOnline()) {
+        import("../services/supabaseService").then(({ deletePlaylist: deletePlaylistFromFirestore }) => {
+          deletePlaylistFromFirestore(playlistId).catch((error) => {
+            console.error("Error deleting playlist from Firestore:", error);
+          });
+        });
+      } else {
+        addToSyncQueue({
+          type: "DELETE_PLAYLIST",
+          data: { id: playlistId },
+        }).catch((error) => {
+          console.error("Error adding to sync queue:", error);
+        });
+      }
+      
       return updatedPlaylists;
     });
   }, []);
@@ -63,6 +120,36 @@ export function usePlaylists() {
     setPlaylists((currentPlaylists) => {
       const updatedPlaylists = [...currentPlaylists, newPlaylist];
       localStorage.setItem("playlists", JSON.stringify(updatedPlaylists));
+      
+      // Also save to IndexedDB for sync
+      const playlistForIndexedDB = {
+        id: newPlaylist.id,
+        title: newPlaylist.title,
+        tracks: [],
+        breakTime: newPlaylist.breakTime,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        synced: false,
+      };
+      
+      savePlaylistToIndexedDB(playlistForIndexedDB).catch((error) => {
+        console.error("Error saving playlist to IndexedDB:", error);
+      });
+      
+      // Sync to Firestore if online, otherwise queue
+      if (isOnline()) {
+        syncPlaylistsToFirestore().catch((error) => {
+          console.error("Error syncing playlist to Firestore:", error);
+        });
+      } else {
+        addToSyncQueue({
+          type: "ADD_PLAYLIST",
+          data: playlistForIndexedDB,
+        }).catch((error) => {
+          console.error("Error adding to sync queue:", error);
+        });
+      }
+      
       return updatedPlaylists;
     });
 

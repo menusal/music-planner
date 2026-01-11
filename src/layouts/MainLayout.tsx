@@ -11,6 +11,7 @@ export default function MainLayout() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [playlist, setPlaylist] = useState<Track[]>([]);
+  const [shouldAutoPlay, setShouldAutoPlay] = useState(false);
 
   return (
     <div className="h-screen w-full bg-gray-900 text-white flex flex-col">
@@ -28,7 +29,13 @@ export default function MainLayout() {
 
       <main className="flex-1 overflow-y-auto mt-[72px] mb-[120px] px-4">
         <Outlet
-          context={{ playlist, setPlaylist, currentTrack, setCurrentTrack }}
+          context={{ 
+            playlist, 
+            setPlaylist, 
+            currentTrack, 
+            setCurrentTrack,
+            setShouldAutoPlay 
+          }}
         />
       </main>
 
@@ -37,6 +44,8 @@ export default function MainLayout() {
           currentTrack={currentTrack}
           playlist={playlist}
           onTrackChange={setCurrentTrack}
+          shouldAutoPlay={shouldAutoPlay}
+          onAutoPlayHandled={() => setShouldAutoPlay(false)}
         />
       </div>
 

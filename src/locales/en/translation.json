@@ -1,13 +1,39 @@
 {
   "title": "Concert Planner",
-  "playList": "Play List",
+  "playList": "DLM Music Planner",
   "dragAndDrop": "Drag and drop MP3 files here",
   "breakTimeLabel": "Break time between songs:",
   "seconds": "seconds",
   "totalDuration": "Total duration:",
   "noTracks": "No tracks added yet",
-  "copyToClipboard": "Copy to clipboard",
+  "copyToClipboard": "Copy",
   "copied": "Copied!",
   "accumulated": "Accumulated",
-  "clickToEdit": "Click to edit playlist title"
+  "clickToEdit": "Click to edit playlist title",
+  "startTimeLabel": "Concert start time:",
+  "noStartTime": "No start time set",
+  "install": {
+    "title": "Install Music Planner",
+    "description": "Install the app for a better experience",
+    "ios_description": "Tap the share button and select \"Add to Home Screen\"",
+    "button": "Install App",
+    "dismiss": "Dismiss"
+  },
+  "update": {
+    "title": "App Update Available",
+    "description": "A new version of the app is available.",
+    "button": "Update Now",
+    "dismiss": "Later"
+  },
+  "offline": {
+    "message": "You are currently offline. Some features may be limited."
+  },
+  "sync": {
+    "online": "Online",
+    "offline": "Offline",
+    "pending": "pending operations",
+    "syncing": "Syncing..."
+  },
+  "refresh": "Refresh playlist",
+  "play": "Play"
 }
