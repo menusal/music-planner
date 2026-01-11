@@ -253,13 +253,12 @@ export default function Player({
               if (trackUrl.startsWith('blob:') || trackUrl.startsWith('http://') || trackUrl.startsWith('https://')) {
                 // For blob URLs, always recreate if we have the file (especially important on mobile)
                 if (trackUrl.startsWith('blob:') && currentTrack?.file) {
+                  debugLog('info', `playTrack: Recreating blob URL - file type: ${currentTrack.file.type}, size: ${currentTrack.file.size}`);
                   // Recreate blob URL to ensure it's fresh and valid (especially important on mobile)
-                  // Revoke old URL if it exists
-                  if (audioRef.current.src && audioRef.current.src.startsWith('blob:')) {
-                    URL.revokeObjectURL(audioRef.current.src);
-                  }
+                  // Don't revoke old URL yet - wait until new one is confirmed working
                   const newBlobUrl = URL.createObjectURL(currentTrack.file);
                   audioRef.current.src = newBlobUrl;
+                  debugLog('info', `playTrack: New blob URL set: ${newBlobUrl.substring(0, 50)}...`);
                   // MIME type is handled by the File/blob object, no need to set on audio element
                   } else {
                     // Set the audio source directly for HTTP/HTTPS URLs
@@ -683,23 +682,71 @@ export default function Player({
         const currentSrc = audioRef.current.src;
         debugLog('info', `Current audio src: ${currentSrc ? currentSrc.substring(0, 50) + '...' : 'none'}`);
         
-        // For blob URLs on mobile, recreate if we have the file
+        // For blob URLs on mobile, always recreate from file to ensure it's fresh
+        // Don't revoke the old URL until we're sure the new one works
+        let newBlobUrl: string | null = null;
+        const oldSrc = audioRef.current.src;
+        
         if (currentTrack.url.startsWith('blob:') && currentTrack.file) {
-          debugLog('info', 'Recreating blob URL for mobile');
-          if (audioRef.current.src && audioRef.current.src.startsWith('blob:')) {
-            URL.revokeObjectURL(audioRef.current.src);
-          }
-          const newBlobUrl = URL.createObjectURL(currentTrack.file);
+          debugLog('info', 'Recreating blob URL for mobile from file');
+          debugLog('info', `File info - name: ${currentTrack.file.name}, type: ${currentTrack.file.type || 'unknown'}, size: ${currentTrack.file.size}`);
+          
+          // Create new blob URL but don't revoke old one yet
+          newBlobUrl = URL.createObjectURL(currentTrack.file);
+          debugLog('info', `Created new blob URL: ${newBlobUrl.substring(0, 50)}...`);
+          
+          // Set the new source
           audioRef.current.src = newBlobUrl;
-          debugLog('info', `New blob URL set: ${newBlobUrl.substring(0, 50)}...`);
+          debugLog('info', `New blob URL set - readyState before load: ${audioRef.current.readyState}`);
         } else if (!audioRef.current.src || audioRef.current.src !== currentTrack.url) {
           audioRef.current.src = currentTrack.url;
-          debugLog('info', 'Audio src updated to track URL');
+          debugLog('info', `Audio src updated to track URL - readyState before load: ${audioRef.current.readyState}`);
         }
         
-        debugLog('info', 'Loading audio...');
-        await audioRef.current.load();
-        debugLog('info', `Audio loaded - readyState: ${audioRef.current.readyState}, paused: ${audioRef.current.paused}`);
+        // Add event listeners before loading
+        let errorFired = false;
+        const handleError = () => {
+          errorFired = true;
+          const error = audioRef.current?.error;
+          debugLog('error', `togglePlay: error event - code: ${error?.code}, message: ${error?.message || 'No message'}`);
+          
+          // If error code 4 (SRC_NOT_SUPPORTED) and we have the file, try recreating blob URL with explicit MIME type
+          if (error?.code === 4 && currentTrack.file && newBlobUrl) {
+            debugLog('info', 'Error code 4 detected, trying to recreate blob URL with explicit MIME type');
+            // Revoke the failed blob URL
+            URL.revokeObjectURL(newBlobUrl);
+            
+            // Try creating a new blob with explicit MIME type
+            try {
+              const fileType = currentTrack.file.type || 'audio/mpeg';
+              debugLog('info', `Creating new blob with explicit MIME type: ${fileType}`);
+              const blob = new Blob([currentTrack.file], { type: fileType });
+              const retryBlobUrl = URL.createObjectURL(blob);
+              if (audioRef.current) {
+                audioRef.current.src = retryBlobUrl;
+                audioRef.current.load();
+                debugLog('info', `Retry blob URL created and loaded: ${retryBlobUrl.substring(0, 50)}...`);
+              }
+            } catch (retryError: any) {
+              debugLog('error', `Failed to create retry blob: ${retryError?.message}`);
+            }
+          }
+        };
+        
+        audioRef.current.addEventListener('error', handleError, { once: true });
+        
+        debugLog('info', 'Calling audio.load()...');
+        audioRef.current.load();
+        debugLog('info', `load() called - readyState immediately after: ${audioRef.current.readyState}`);
+        
+        // Wait a bit and check if error occurred
+        setTimeout(() => {
+          if (!errorFired && newBlobUrl && oldSrc && oldSrc.startsWith('blob:') && oldSrc !== newBlobUrl) {
+            debugLog('info', 'No error after 100ms, revoking old blob URL');
+            URL.revokeObjectURL(oldSrc);
+          }
+          debugLog('info', `readyState after 100ms: ${audioRef.current?.readyState}, paused: ${audioRef.current?.paused}, error: ${errorFired}`);
+        }, 100);
       }
       
       // Toggle play/pause
