@@ -7,6 +7,9 @@ interface LogEntry {
   message: string;
 }
 
+// Version number - increment this when deploying a new version
+const DEBUG_PANEL_VERSION = '1.0.3';
+
 const DebugPanel = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -74,8 +77,9 @@ const DebugPanel = () => {
         onClick={() => setIsOpen(true)}
         className="fixed bottom-4 right-4 z-50 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium"
         aria-label="Open Debug Panel"
+        title={`Debug Panel v${DEBUG_PANEL_VERSION}`}
       >
-        Debug
+        Debug v{DEBUG_PANEL_VERSION}
       </button>
     );
   }
@@ -83,7 +87,7 @@ const DebugPanel = () => {
   return (
     <div className="fixed bottom-4 right-4 z-50 w-96 max-w-[calc(100vw-2rem)] bg-gray-900 border border-gray-700 rounded-lg shadow-2xl flex flex-col max-h-[80vh]">
       <div className="flex items-center justify-between p-3 border-b border-gray-700">
-        <h3 className="text-white font-semibold text-sm">Debug Logs</h3>
+        <h3 className="text-white font-semibold text-sm">Debug Logs v{DEBUG_PANEL_VERSION}</h3>
         <div className="flex items-center space-x-2">
           <button
             id="copy-logs-btn"

@@ -682,22 +682,30 @@ export default function Player({
         const currentSrc = audioRef.current.src;
         debugLog('info', `Current audio src: ${currentSrc ? currentSrc.substring(0, 50) + '...' : 'none'}`);
         
-        // For blob URLs on mobile, always recreate from file to ensure it's fresh
-        // Don't revoke the old URL until we're sure the new one works
-        let newBlobUrl: string | null = null;
+        // For blob URLs on mobile, try to reuse existing blob URL if it's still valid
+        // Only recreate if necessary
         const oldSrc = audioRef.current.src;
+        let newBlobUrl: string | null = null;
         
         if (currentTrack.url.startsWith('blob:') && currentTrack.file) {
-          debugLog('info', 'Recreating blob URL for mobile from file');
           debugLog('info', `File info - name: ${currentTrack.file.name}, type: ${currentTrack.file.type || 'unknown'}, size: ${currentTrack.file.size}`);
           
-          // Create new blob URL but don't revoke old one yet
-          newBlobUrl = URL.createObjectURL(currentTrack.file);
-          debugLog('info', `Created new blob URL: ${newBlobUrl.substring(0, 50)}...`);
-          
-          // Set the new source
-          audioRef.current.src = newBlobUrl;
-          debugLog('info', `New blob URL set - readyState before load: ${audioRef.current.readyState}`);
+          // Check if current src is a blob URL and if it's different from track URL
+          // On mobile, try to reuse the existing blob URL if it exists and is valid
+          if (oldSrc && oldSrc.startsWith('blob:') && oldSrc === currentTrack.url) {
+            debugLog('info', 'Reusing existing blob URL (matches track URL)');
+            // Keep using the existing blob URL
+            audioRef.current.src = oldSrc;
+          } else {
+            debugLog('info', 'Creating new blob URL for mobile');
+            // Create new blob URL but don't revoke old one yet
+            newBlobUrl = URL.createObjectURL(currentTrack.file);
+            debugLog('info', `Created new blob URL: ${newBlobUrl.substring(0, 50)}...`);
+            
+            // Set the new source
+            audioRef.current.src = newBlobUrl;
+            debugLog('info', `New blob URL set - readyState before load: ${audioRef.current.readyState}`);
+          }
         } else if (!audioRef.current.src || audioRef.current.src !== currentTrack.url) {
           audioRef.current.src = currentTrack.url;
           debugLog('info', `Audio src updated to track URL - readyState before load: ${audioRef.current.readyState}`);
@@ -733,37 +741,45 @@ export default function Player({
           debugLog('error', `togglePlay: error event - code: ${error?.code}, message: ${error?.message || 'No message'}`);
           
           // Don't revoke old blob URL if there's an error - might need it
-          // If error code 4 (SRC_NOT_SUPPORTED) and we have the file, try recreating blob URL
+          // If error code 4 (SRC_NOT_SUPPORTED) and we have the file, try different approaches
           if (error?.code === 4 && currentTrack.file) {
-            debugLog('info', 'Error code 4 detected, trying alternative approach');
+            debugLog('info', 'Error code 4 detected, trying alternative approaches');
             
             // Revoke the failed blob URL
             if (newBlobUrl) {
               URL.revokeObjectURL(newBlobUrl);
             }
             
-            // Try creating a new blob with explicit MIME type and different approach
+            // Try approach 1: Create blob directly from file (simpler)
             try {
               const fileType = currentTrack.file.type || 'audio/mpeg';
-              debugLog('info', `Creating new blob with explicit MIME type: ${fileType}`);
-              
-              // Read file as ArrayBuffer first, then create blob
-              const reader = new FileReader();
-              reader.onload = () => {
-                if (reader.result && audioRef.current) {
-                  const blob = new Blob([reader.result], { type: fileType });
-                  const retryBlobUrl = URL.createObjectURL(blob);
-                  debugLog('info', `Retry blob URL created from ArrayBuffer: ${retryBlobUrl.substring(0, 50)}...`);
-                  audioRef.current.src = retryBlobUrl;
-                  audioRef.current.load();
-                }
-              };
-              reader.onerror = () => {
-                debugLog('error', 'FileReader failed to read file');
-              };
-              reader.readAsArrayBuffer(currentTrack.file);
+              debugLog('info', `Attempt 1: Creating blob directly from file with MIME type: ${fileType}`);
+              const blob = new Blob([currentTrack.file], { type: fileType });
+              const retryBlobUrl1 = URL.createObjectURL(blob);
+              if (audioRef.current) {
+                audioRef.current.src = retryBlobUrl1;
+                audioRef.current.load();
+                debugLog('info', `Retry blob URL 1 created: ${retryBlobUrl1.substring(0, 50)}...`);
+                
+                // Set up error handler for this attempt
+                const handleRetryError = () => {
+                  const retryError = audioRef.current?.error;
+                  debugLog('error', `Retry attempt 1 failed - code: ${retryError?.code}`);
+                  
+                  // Try approach 2: Use file directly without blob wrapper
+                  if (audioRef.current && currentTrack.file) {
+                    debugLog('info', 'Attempt 2: Using file directly with createObjectURL');
+                    URL.revokeObjectURL(retryBlobUrl1);
+                    const directBlobUrl = URL.createObjectURL(currentTrack.file);
+                    audioRef.current.src = directBlobUrl;
+                    audioRef.current.load();
+                    debugLog('info', `Direct blob URL created: ${directBlobUrl.substring(0, 50)}...`);
+                  }
+                };
+                audioRef.current.addEventListener('error', handleRetryError, { once: true });
+              }
             } catch (retryError: any) {
-              debugLog('error', `Failed to create retry blob: ${retryError?.message}`);
+              debugLog('error', `Failed retry attempt 1: ${retryError?.message}`);
             }
           }
         };
