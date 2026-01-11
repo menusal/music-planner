@@ -171,42 +171,78 @@ export default function Player({
             try {
               // Test if URL is valid
               if (trackUrl.startsWith('blob:') || trackUrl.startsWith('http://') || trackUrl.startsWith('https://')) {
-                audioRef.current.src = trackUrl;
+                // For blob URLs, ensure we have the file to recreate if needed
+                if (trackUrl.startsWith('blob:') && currentTrack?.file) {
+                  // Recreate blob URL to ensure it's fresh and valid
+                  // Revoke old URL if it exists
+                  if (audioRef.current.src && audioRef.current.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(audioRef.current.src);
+                  }
+                  const newBlobUrl = URL.createObjectURL(currentTrack.file);
+                  audioRef.current.src = newBlobUrl;
+                } else {
+                  // Set the audio source directly
+                  if (!audioRef.current.src || audioRef.current.src !== trackUrl) {
+                    audioRef.current.src = trackUrl;
+                  }
+                }
                 
                 // Add error handler for audio loading
                 const handleAudioError = (_e: Event) => {
                   if (isSubscribed) {
                     setIsPlaying(false);
                   }
-                  // Try to notify user
+                  // Log error details for debugging
                   if (audioRef.current?.error) {
-                    // Error handled silently
+                    const error = audioRef.current.error;
+                    // Create a user-visible error message
+                    const errorMessage = `Audio error: ${error.code} - ${error.message || 'Unknown error'}`;
+                    // Show error to user (you can replace this with a toast notification)
+                    alert(errorMessage);
                   }
+                };
+                
+                // Add canplay handler to ensure audio is ready
+                const handleCanPlay = () => {
+                  if (isSubscribed && isPlaying && audioRef.current) {
+                    audioRef.current.play().catch((_playError) => {
+                      if (isSubscribed) {
+                        setIsPlaying(false);
+                      }
+                    });
+                  }
+                };
+                
+                // Add loadedmetadata handler
+                const handleLoadedMetadata = () => {
+                  // Audio metadata is loaded, we can check duration
                 };
                 
                 audioRef.current.addEventListener('error', handleAudioError, { once: true });
+                audioRef.current.addEventListener('canplay', handleCanPlay, { once: true });
+                audioRef.current.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
                 
-                // Add loadeddata handler to verify audio loaded successfully
-                const handleLoadedData = () => {
-                  audioRef.current?.removeEventListener('error', handleAudioError);
-                };
+                // Load the audio source
+                audioRef.current.load();
                 
-                audioRef.current.addEventListener('loadeddata', handleLoadedData, { once: true });
-                
-                await audioRef.current.load();
-                
-                // Auto-play if isPlaying is true (set when user clicks track)
+                // Auto-play if isPlaying is true and audio is ready
                 if (isSubscribed && isPlaying) {
-                  try {
-                    await audioRef.current.play();
-                  } catch (playError) {
-                    // Reset isPlaying if play fails
-                    if (isSubscribed) {
-                      setIsPlaying(false);
+                  // Wait a bit for the audio to start loading
+                  setTimeout(async () => {
+                    if (audioRef.current && audioRef.current.readyState >= 2) {
+                      try {
+                        await audioRef.current.play();
+                      } catch (playError) {
+                        // Reset isPlaying if play fails
+                        if (isSubscribed) {
+                          setIsPlaying(false);
+                        }
+                      }
                     }
-                  }
+                  }, 100);
                 }
               } else {
+                throw new Error('Invalid track URL format');
               }
             } catch (error) {
               if (isSubscribed) {
@@ -391,13 +427,45 @@ export default function Player({
         return;
       }
       
+      // Ensure track has a valid URL
+      if (!currentTrack.url && currentTrack.file) {
+        const blobUrl = URL.createObjectURL(currentTrack.file);
+        const trackWithUrl = { ...currentTrack, url: blobUrl };
+        onTrackChange(trackWithUrl);
+      }
+      
+      // Ensure audio source is set
+      if (audioRef.current && currentTrack.url) {
+        if (!audioRef.current.src || audioRef.current.src !== currentTrack.url) {
+          audioRef.current.src = currentTrack.url;
+          await audioRef.current.load();
+        }
+      }
+      
       // Resume audio context if suspended (required for user interaction)
       if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
         await audioContextRef.current.resume();
       }
       
-      setIsPlaying(!isPlaying);
+      // Toggle play/pause
+      if (isPlaying) {
+        if (audioRef.current && !audioRef.current.paused) {
+          audioRef.current.pause();
+        }
+        setIsPlaying(false);
+      } else {
+        setIsPlaying(true);
+        // Try to play immediately
+        if (audioRef.current && audioRef.current.readyState >= 2) {
+          try {
+            await audioRef.current.play();
+          } catch (playError) {
+            // Play will be handled by the useEffect
+          }
+        }
+      }
     } catch (error) {
+      // Error handled
     }
   };
 
