@@ -1,6 +1,6 @@
 const QUEUE_STORE_NAME = "syncQueue";
 const DB_NAME = "musicPlayerDB";
-const DB_VERSION = 3; // Must match indexedDB.ts version
+const DB_VERSION = 4; // Must match indexedDB.ts version
 
 export type SyncOperationType = 
   | "ADD_TRACK" 
@@ -13,7 +13,7 @@ export type SyncOperationType =
 export interface SyncOperation {
   id: string;
   type: SyncOperationType;
-  data: any;
+  data: unknown;
   timestamp: number;
   retries: number;
 }
@@ -40,7 +40,6 @@ export const addToSyncQueue = async (operation: Omit<SyncOperation, "id" | "time
     
     // Check if store exists, if not, return (store will be created on next upgrade)
     if (!db.objectStoreNames.contains(QUEUE_STORE_NAME)) {
-      console.warn("SyncQueue store not found, operation will be lost. Database upgrade needed.");
       return;
     }
     
@@ -60,7 +59,6 @@ export const addToSyncQueue = async (operation: Omit<SyncOperation, "id" | "time
       request.onsuccess = () => resolve();
     });
   } catch (error) {
-    console.error("Error adding to sync queue:", error);
     throw error;
   }
 };
@@ -83,7 +81,6 @@ export const getAllQueuedOperations = async (): Promise<SyncOperation[]> => {
       request.onsuccess = () => resolve(request.result || []);
     });
   } catch (error) {
-    console.error("Error getting queued operations:", error);
     return [];
   }
 };

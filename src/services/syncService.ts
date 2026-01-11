@@ -37,39 +37,76 @@ export const isOnline = (): boolean => {
 // Sync tracks from Firestore to IndexedDB
 export const syncTracksFromFirestore = async (): Promise<void> => {
   if (!isOnline()) {
-    console.log("Offline: Cannot sync from Firestore");
     return;
   }
 
   try {
     const firestoreTracks = await getFirestoreTracks();
-    const indexedDBTracks = await getIndexedDBTracks();
+    
+    if (!Array.isArray(firestoreTracks)) {
+      return;
+    }
+    
+    let indexedDBTracks: any[] = [];
+    try {
+      indexedDBTracks = await getIndexedDBTracks();
+    } catch (indexedDBError) {
+      indexedDBTracks = [];
+    }
+    
+    if (!Array.isArray(indexedDBTracks)) {
+      indexedDBTracks = [];
+    }
+    
 
     // Create a map of existing tracks
     const existingTracksMap = new Map(
       indexedDBTracks.map((track) => [track.id, track])
     );
 
+    let syncedCount = 0;
+    let errorCount = 0;
+    let skippedCount = 0;
+
+
     // Sync tracks from Firestore (server wins on conflict)
-    for (const firestoreTrack of firestoreTracks) {
+    for (let i = 0; i < firestoreTracks.length; i++) {
+      const firestoreTrack = firestoreTracks[i];
       try {
         const dbTrack = await convertFirestoreTrackToDBTrack(firestoreTrack);
         const existingTrack = existingTracksMap.get(dbTrack.id);
 
         // If track doesn't exist locally or Firestore version is newer, update
         if (!existingTrack || firestoreTrack.updatedAt > (existingTrack as any).updatedAt) {
-          await saveTrackToIndexedDB({
-            ...dbTrack,
-            order: firestoreTrack.order ?? 0,
-            synced: true,
-            updatedAt: firestoreTrack.updatedAt,
-          } as any);
+          try {
+            const trackToSave = {
+              ...dbTrack,
+              order: firestoreTrack.order ?? 0,
+              synced: true,
+              updatedAt: firestoreTrack.updatedAt,
+            };
+            const savePromise = saveTrackToIndexedDB(trackToSave as any);
+            
+            // Add timeout to detect hanging promises
+            const timeoutPromise = new Promise((_, reject) => {
+              setTimeout(() => reject(new Error('Save operation timed out after 30 seconds')), 30000);
+            });
+            
+            await Promise.race([savePromise, timeoutPromise]);
+            syncedCount++;
+          } catch (saveError) {
+            errorCount++;
+            // Don't re-throw - continue with other tracks
+          }
+        } else {
+          skippedCount++;
         }
       } catch (error) {
-        console.error(`Error converting track ${firestoreTrack.id} from Firestore:`, error);
+        errorCount++;
         // Continue with other tracks
       }
     }
+    
 
     // Remove tracks that were deleted from Firestore
     const firestoreTrackIds = new Set(firestoreTracks.map((t) => t.id));
@@ -79,12 +116,16 @@ export const syncTracksFromFirestore = async (): Promise<void> => {
       }
     }
     
-    // Dispatch event to notify that tracks were synced
-    if (firestoreTracks.length > 0) {
-      window.dispatchEvent(new CustomEvent('tracks-synced'));
-    }
+    // Always dispatch event to notify that sync completed (even if no tracks)
+    // This ensures the UI reloads tracks from IndexedDB
+    window.dispatchEvent(new CustomEvent('tracks-synced', { 
+      detail: { trackCount: syncedCount, totalTracks: firestoreTracks.length } 
+    }));
   } catch (error) {
-    console.error("Error syncing tracks from Firestore:", error);
+    // Still dispatch event so UI can try to load what's available
+    window.dispatchEvent(new CustomEvent('tracks-synced', { 
+      detail: { trackCount: 0, error: true } 
+    }));
     throw error;
   }
 };
@@ -92,7 +133,6 @@ export const syncTracksFromFirestore = async (): Promise<void> => {
 // Sync tracks from IndexedDB to Firestore
 export const syncTracksToFirestore = async (): Promise<void> => {
   if (!isOnline()) {
-    console.log("Offline: Cannot sync to Firestore");
     return;
   }
 
@@ -120,12 +160,10 @@ export const syncTracksToFirestore = async (): Promise<void> => {
           updatedAt: Date.now(),
         } as any);
       } catch (error) {
-        console.error(`Error syncing track ${track.id} to Firestore:`, error);
         // Don't throw, continue with other tracks
       }
     }
   } catch (error) {
-    console.error("Error syncing tracks to Firestore:", error);
     throw error;
   }
 };
@@ -133,7 +171,6 @@ export const syncTracksToFirestore = async (): Promise<void> => {
 // Sync playlists from Firestore to IndexedDB
 export const syncPlaylistsFromFirestore = async (): Promise<void> => {
   if (!isOnline()) {
-    console.log("Offline: Cannot sync playlists from Firestore");
     return;
   }
 
@@ -170,7 +207,6 @@ export const syncPlaylistsFromFirestore = async (): Promise<void> => {
       }
     }
   } catch (error) {
-    console.error("Error syncing playlists from Firestore:", error);
     throw error;
   }
 };
@@ -178,7 +214,6 @@ export const syncPlaylistsFromFirestore = async (): Promise<void> => {
 // Sync playlists from IndexedDB to Firestore
 export const syncPlaylistsToFirestore = async (): Promise<void> => {
   if (!isOnline()) {
-    console.log("Offline: Cannot sync playlists to Firestore");
     return;
   }
 
@@ -205,15 +240,10 @@ export const syncPlaylistsToFirestore = async (): Promise<void> => {
           updatedAt: Date.now(),
         } as IndexedDBPlaylist);
       } catch (error) {
-        console.error(
-          `Error syncing playlist ${playlist.id} to Firestore:`,
-          error
-        );
         // Don't throw, continue with other playlists
       }
     }
   } catch (error) {
-    console.error("Error syncing playlists to Firestore:", error);
     throw error;
   }
 };
@@ -236,62 +266,87 @@ export const processSyncQueue = async (): Promise<void> => {
     for (const operation of queuedOperations) {
       try {
         switch (operation.type) {
-          case "ADD_TRACK":
+          case "ADD_TRACK": {
+            const trackData = operation.data as {
+              id: string;
+              title: string;
+              artist?: string;
+              duration: number;
+              fileBlob: Blob;
+              order?: number;
+            };
             await uploadTrackToFirestore(
-              operation.data.id,
-              operation.data.title,
-              operation.data.artist,
-              operation.data.duration,
-              operation.data.fileBlob
+              trackData.id,
+              trackData.title,
+              trackData.artist,
+              trackData.duration,
+              trackData.fileBlob,
+              trackData.order ?? 0
             );
             await saveTrackToIndexedDB({
-              ...operation.data,
+              ...trackData,
               synced: true,
               updatedAt: Date.now(),
             } as any);
             await removeFromSyncQueue(operation.id);
             break;
+          }
 
-          case "DELETE_TRACK":
-            await deleteTrackFromFirestore(operation.data.id);
+          case "DELETE_TRACK": {
+            const deleteData = operation.data as { id: string };
+            await deleteTrackFromFirestore(deleteData.id);
             await removeFromSyncQueue(operation.id);
             break;
+          }
 
           case "ADD_PLAYLIST":
-          case "UPDATE_PLAYLIST":
+          case "UPDATE_PLAYLIST": {
+            const playlistData = operation.data as {
+              id: string;
+              title: string;
+              tracks: string[];
+              breakTime: number;
+              startTime?: string;
+            };
             await uploadPlaylistToFirestore(
-              operation.data.id,
-              operation.data.title,
-              operation.data.tracks,
-              operation.data.breakTime,
-              operation.data.startTime
+              playlistData.id,
+              playlistData.title,
+              playlistData.tracks,
+              playlistData.breakTime,
+              playlistData.startTime
             );
             await savePlaylistToIndexedDB({
-              ...operation.data,
+              ...playlistData,
               synced: true,
               updatedAt: Date.now(),
             } as any);
             await removeFromSyncQueue(operation.id);
             break;
+          }
 
-          case "DELETE_PLAYLIST":
-            await deletePlaylistFromFirestore(operation.data.id);
+          case "DELETE_PLAYLIST": {
+            const deleteData = operation.data as { id: string };
+            await deletePlaylistFromFirestore(deleteData.id);
             await removeFromSyncQueue(operation.id);
             break;
+          }
 
-          case "UPDATE_TRACK_ORDER":
-            if (operation.data.trackOrders && Array.isArray(operation.data.trackOrders)) {
-              await updateTracksOrder(operation.data.trackOrders);
-            }
+          case "UPDATE_TRACK_ORDER": {
+            const orderData = operation.data as { tracks: { id: string; order: number }[] };
+            // Convert from { id, order } to { trackId, order } format
+            const trackOrders = orderData.tracks.map(({ id, order }) => ({
+              trackId: id,
+              order,
+            }));
+            await updateTracksOrder(trackOrders);
             await removeFromSyncQueue(operation.id);
             break;
+          }
 
           default:
-            console.warn(`Unknown operation type: ${operation.type}`);
             await removeFromSyncQueue(operation.id);
         }
       } catch (error) {
-        console.error(`Error processing sync operation ${operation.id}:`, error);
         operation.retries += 1;
 
         if (operation.retries >= MAX_RETRIES) {
@@ -310,17 +365,19 @@ export const processSyncQueue = async (): Promise<void> => {
 // Full sync: bidirectional sync
 export const performFullSync = async (): Promise<void> => {
   if (!isOnline()) {
-    console.log("Offline: Cannot perform full sync");
     return;
   }
 
   try {
+    
     // First, sync from Firestore to IndexedDB (get latest from server)
     await syncTracksFromFirestore();
+    
     await syncPlaylistsFromFirestore();
 
     // Then, sync local changes to Firestore
     await syncTracksToFirestore();
+    
     await syncPlaylistsToFirestore();
 
     // Process any queued operations
@@ -329,7 +386,8 @@ export const performFullSync = async (): Promise<void> => {
     // Dispatch event to notify that sync is complete
     window.dispatchEvent(new CustomEvent('sync-complete'));
   } catch (error) {
-    console.error("Error performing full sync:", error);
+    // Still dispatch event so UI can try to load what's available
+    window.dispatchEvent(new CustomEvent('sync-complete'));
     throw error;
   }
 };
@@ -342,24 +400,21 @@ export const startPeriodicSync = (): void => {
 
   // Perform initial sync
   if (isOnline()) {
-    performFullSync().catch((error) => {
-      console.error("Error in initial sync:", error);
+    performFullSync().catch((_error) => {
     });
   }
 
   // Set up periodic sync
   syncIntervalId = window.setInterval(() => {
     if (isOnline()) {
-      performFullSync().catch((error) => {
-        console.error("Error in periodic sync:", error);
+      performFullSync().catch((_error) => {
       });
     }
   }, SYNC_INTERVAL);
 
   // Listen for online/offline events
   window.addEventListener("online", () => {
-    performFullSync().catch((error) => {
-      console.error("Error syncing after coming online:", error);
+    performFullSync().catch((_error) => {
     });
   });
 };
@@ -378,14 +433,12 @@ export const syncTracksOrderToFirestore = async (
   trackOrders: { trackId: string; order: number }[]
 ): Promise<void> => {
   if (!isOnline()) {
-    console.log("Offline: Cannot sync order to Firestore");
     return;
   }
 
   try {
     await updateTracksOrder(trackOrders);
   } catch (error) {
-    console.error("Error syncing tracks order to Firestore:", error);
     throw error;
   }
 };

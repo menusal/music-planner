@@ -53,21 +53,18 @@ export function usePlaylists() {
         synced: false,
       };
       
-      savePlaylistToIndexedDB(playlistForIndexedDB).catch((error) => {
-        console.error("Error saving playlist to IndexedDB:", error);
+      savePlaylistToIndexedDB(playlistForIndexedDB).catch((_error) => {
       });
       
       // Sync to Firestore if online, otherwise queue
       if (isOnline()) {
-        syncPlaylistsToFirestore().catch((error) => {
-          console.error("Error syncing playlist to Firestore:", error);
+        syncPlaylistsToFirestore().catch((_error) => {
         });
       } else {
         addToSyncQueue({
           type: "UPDATE_PLAYLIST",
           data: playlistForIndexedDB,
-        }).catch((error) => {
-          console.error("Error adding to sync queue:", error);
+        }).catch((_error) => {
         });
       }
       
@@ -84,24 +81,21 @@ export function usePlaylists() {
       
       // Delete from IndexedDB
       import("../services/indexedDB").then(({ deletePlaylist: deletePlaylistFromIndexedDB }) => {
-        deletePlaylistFromIndexedDB(playlistId).catch((error) => {
-          console.error("Error deleting playlist from IndexedDB:", error);
+        deletePlaylistFromIndexedDB(playlistId).catch((_error) => {
         });
       });
       
       // Sync deletion to Firestore if online, otherwise queue
       if (isOnline()) {
         import("../services/supabaseService").then(({ deletePlaylist: deletePlaylistFromFirestore }) => {
-          deletePlaylistFromFirestore(playlistId).catch((error) => {
-            console.error("Error deleting playlist from Firestore:", error);
+          deletePlaylistFromFirestore(playlistId).catch((_error) => {
           });
         });
       } else {
         addToSyncQueue({
           type: "DELETE_PLAYLIST",
           data: { id: playlistId },
-        }).catch((error) => {
-          console.error("Error adding to sync queue:", error);
+        }).catch((_error) => {
         });
       }
       
@@ -132,21 +126,18 @@ export function usePlaylists() {
         synced: false,
       };
       
-      savePlaylistToIndexedDB(playlistForIndexedDB).catch((error) => {
-        console.error("Error saving playlist to IndexedDB:", error);
+      savePlaylistToIndexedDB(playlistForIndexedDB).catch((_error) => {
       });
       
       // Sync to Firestore if online, otherwise queue
       if (isOnline()) {
-        syncPlaylistsToFirestore().catch((error) => {
-          console.error("Error syncing playlist to Firestore:", error);
+        syncPlaylistsToFirestore().catch((_error) => {
         });
       } else {
         addToSyncQueue({
           type: "ADD_PLAYLIST",
           data: playlistForIndexedDB,
-        }).catch((error) => {
-          console.error("Error adding to sync queue:", error);
+        }).catch((_error) => {
         });
       }
       

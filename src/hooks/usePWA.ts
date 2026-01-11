@@ -99,7 +99,6 @@ const usePWA = () => {
       }
       return false;
     } catch (error) {
-      console.error('Error installing PWA:', error);
       return false;
     }
   };

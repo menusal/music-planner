@@ -1,5 +1,5 @@
 const DB_NAME = "musicPlayerDB";
-const DB_VERSION = 3; // Incremented to add order field
+const DB_VERSION = 4; // Incremented to match existing database version
 const STORE_NAME = "tracks";
 const QUEUE_STORE_NAME = "syncQueue";
 
@@ -25,17 +25,68 @@ export interface Playlist {
   synced?: boolean;
 }
 
+// Cache for the database connection to avoid multiple simultaneous opens
+let dbPromise: Promise<IDBDatabase> | null = null;
+
 export const initDB = (): Promise<IDBDatabase> => {
-  return new Promise((resolve, reject) => {
+  // If there's already an ongoing initialization, wait for it
+  if (dbPromise) {
+    return dbPromise.then(db => {
+      // Verify the database is still open and has the required stores
+      if (db.objectStoreNames.contains(STORE_NAME)) {
+        return db;
+      }
+      // If stores are missing, close and reinitialize
+      db.close();
+      dbPromise = null;
+      return initDB();
+    });
+  }
+
+  dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => {
+      dbPromise = null;
+      reject(request.error);
+    };
+    
+    request.onsuccess = () => {
+      const db = request.result;
+      
+      // Verify all required stores exist
+      const hasTracksStore = db.objectStoreNames.contains(STORE_NAME);
+      const hasPlaylistsStore = db.objectStoreNames.contains("playlists");
+      const hasQueueStore = db.objectStoreNames.contains(QUEUE_STORE_NAME);
+      
+      if (!hasTracksStore || !hasPlaylistsStore || !hasQueueStore) {
+        
+        // Close the database
+        db.close();
+        dbPromise = null;
+        
+        // Delete and recreate the database
+        const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
+        deleteRequest.onsuccess = () => {
+          // Retry initialization
+          dbPromise = null;
+          initDB().then(resolve).catch(reject);
+        };
+        deleteRequest.onerror = () => {
+          dbPromise = null;
+          reject(new Error('Failed to delete corrupted database'));
+        };
+        return;
+      }
+      
+      resolve(db);
+    };
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
       const oldVersion = event.oldVersion || 0;
       const transaction = (event.target as IDBOpenDBRequest).transaction;
+
 
       // Create stores if they don't exist
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -43,21 +94,18 @@ export const initDB = (): Promise<IDBDatabase> => {
         trackStore.createIndex("synced", "synced", { unique: false });
         trackStore.createIndex("updatedAt", "updatedAt", { unique: false });
         trackStore.createIndex("order", "order", { unique: false });
-      } else if (oldVersion < 3 && transaction) {
-        // Add order index to existing store if upgrading from version 2 or earlier
-        // We can't reliably check if index exists during upgrade, so we try to create it
-        // and ignore errors if it already exists
+      } else if (oldVersion < 4 && transaction) {
+        // Add order index to existing store if upgrading from version 3 or earlier
         try {
           const trackStore = transaction.objectStore(STORE_NAME);
-          // Try to create the index - if it exists, this will throw, which we'll catch
-          trackStore.createIndex("order", "order", { unique: false });
-        } catch (error: any) {
-          // Index might already exist (error code 0 or ConstraintError)
-          // or there's another issue - log but don't fail the upgrade
-          if (error?.name !== "ConstraintError" && error?.code !== 0) {
-            console.warn("Could not add order index:", error);
+          // Check if order index already exists by trying to create it
+          if (!trackStore.indexNames.contains("order")) {
+            trackStore.createIndex("order", "order", { unique: false });
           }
-          // Continue with upgrade even if index creation fails
+        } catch (error: unknown) {
+          const err = error as { name?: string; code?: number };
+          if (err?.name !== "ConstraintError" && err?.code !== 0) {
+          }
         }
       }
 
@@ -67,7 +115,6 @@ export const initDB = (): Promise<IDBDatabase> => {
         const playlistStore = db.createObjectStore(PLAYLISTS_STORE, {
           keyPath: "id",
         });
-        // Optionally add indexes if needed
         playlistStore.createIndex("createdAt", "createdAt", { unique: false });
         playlistStore.createIndex("updatedAt", "updatedAt", { unique: false });
         playlistStore.createIndex("synced", "synced", { unique: false });
@@ -77,28 +124,104 @@ export const initDB = (): Promise<IDBDatabase> => {
       if (!db.objectStoreNames.contains(QUEUE_STORE_NAME)) {
         db.createObjectStore(QUEUE_STORE_NAME, { keyPath: "id" });
       }
+      
     };
   });
+
+  return dbPromise;
 };
 
-export const saveTrack = async (track: DBTrack): Promise<void> => {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
+export const saveTrack = async (track: DBTrack, retryCount = 0): Promise<void> => {
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 100; // 100ms delay between retries
+  
+  try {
     
-    // Ensure synced and updatedAt are set
-    const trackToSave = {
-      ...track,
-      synced: track.synced ?? false,
-      updatedAt: track.updatedAt ?? Date.now(),
-    };
+    const db = await initDB();
     
-    const request = store.put(trackToSave);
+    // Verify the store exists before creating a transaction
+    if (!db.objectStoreNames.contains(STORE_NAME)) {
+      
+      // Close the database and retry after a delay
+      db.close();
+      
+      if (retryCount < MAX_RETRIES) {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+        return saveTrack(track, retryCount + 1);
+      } else {
+        throw new Error(`Store "${STORE_NAME}" does not exist after ${MAX_RETRIES} retries`);
+      }
+    }
+    
+    
+    return new Promise((resolve, reject) => {
+      try {
+        const transaction = db.transaction([STORE_NAME], "readwrite");
+        
+        transaction.onerror = () => {
+          reject(transaction.error);
+        };
+        
+        transaction.oncomplete = () => {
+        };
+        
+        transaction.onabort = () => {
+          reject(new Error('Transaction aborted'));
+        };
+        
+        const store = transaction.objectStore(STORE_NAME);
+        
+        // Ensure synced and updatedAt are set
+        const trackToSave = {
+          ...track,
+          synced: track.synced ?? false,
+          updatedAt: track.updatedAt ?? Date.now(),
+        };
+        
+        const request = store.put(trackToSave);
 
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
-  });
+        request.onerror = () => {
+          
+          // If it's a NotFoundError and we haven't exceeded retries, retry
+          if (request.error?.name === 'NotFoundError' && retryCount < MAX_RETRIES) {
+            db.close();
+            setTimeout(() => {
+              saveTrack(track, retryCount + 1).then(resolve).catch(reject);
+            }, RETRY_DELAY * (retryCount + 1));
+            return;
+          }
+          
+          reject(request.error);
+        };
+        
+        request.onsuccess = () => {
+          resolve();
+        };
+      } catch (error) {
+        // If it's a NotFoundError and we haven't exceeded retries, retry
+        if (error instanceof Error && error.name === 'NotFoundError' && retryCount < MAX_RETRIES) {
+          db.close();
+          setTimeout(() => {
+            saveTrack(track, retryCount + 1).then(resolve).catch(reject);
+          }, RETRY_DELAY * (retryCount + 1));
+          return;
+        }
+        
+        reject(error);
+      }
+    });
+  } catch (error) {
+    // If it's a NotFoundError or version error and we haven't exceeded retries, retry
+    if (retryCount < MAX_RETRIES && (
+      (error instanceof Error && error.name === 'NotFoundError') ||
+      (error instanceof Error && error.message.includes('object stores was not found'))
+    )) {
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+      return saveTrack(track, retryCount + 1);
+    }
+    
+    throw error;
+  }
 };
 
 export const getAllTracks = async (): Promise<DBTrack[]> => {

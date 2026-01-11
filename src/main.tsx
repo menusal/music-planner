@@ -11,27 +11,35 @@ import { startPeriodicSync, performFullSync } from "./services/syncService";
 // with registerType: "autoUpdate" in vite.config.ts
 
 // Initialize sync service
-window.addEventListener('load', () => {
+const initializeSync = async () => {
   // Start periodic sync
   startPeriodicSync();
   
   // Perform initial sync if online (this will load tracks from Supabase)
   if (navigator.onLine) {
-    performFullSync()
-      .then(() => {
-        console.log('Initial sync completed');
-        // Dispatch event to notify components that initial sync is done
-        window.dispatchEvent(new CustomEvent('initial-sync-complete'));
-      })
-      .catch((error) => {
-        console.error('Error in initial sync:', error);
-      });
+    try {
+      await performFullSync();
+      // Dispatch event to notify components that initial sync is done
+      window.dispatchEvent(new CustomEvent('initial-sync-complete'));
+    } catch (error) {
+      // Still dispatch event so UI can try to load what's available
+      window.dispatchEvent(new CustomEvent('initial-sync-complete'));
+    }
+  } else {
   }
-});
+};
+
+// Initialize sync when DOM is ready
+if (document.readyState === 'loading') {
+  window.addEventListener('load', initializeSync);
+} else {
+  // DOM is already ready
+  initializeSync();
+}
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <BrowserRouter basename="/concert-planner">
+    <BrowserRouter basename={import.meta.env.PROD ? '/' : '/concert-planner'}>
       <App />
     </BrowserRouter>
   </React.StrictMode>

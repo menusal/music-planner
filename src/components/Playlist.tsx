@@ -45,6 +45,7 @@ export default function Playlist({
   const { t } = useTranslation();
   const [showCopiedFeedback, setShowCopiedFeedback] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [playlistTitle, setPlaylistTitle] = useState(() => {
     const savedTitle = localStorage.getItem(PLAYLIST_TITLE_KEY);
     return savedTitle || t("playList");
@@ -89,6 +90,7 @@ export default function Playlist({
   const loadTracks = useCallback(async () => {
     try {
       const savedTracks = await getAllTracks();
+      
       const tracksWithUrls: Track[] = [];
       for (const track of savedTracks) {
         if (track.fileBlob) {
@@ -104,10 +106,11 @@ export default function Playlist({
               }),
             });
           } catch (error) {
-            console.error(`Error creating URL for track ${track.id}:`, error);
           }
+        } else {
         }
       }
+
 
       // Sort tracks by order field from IndexedDB, then by created_at as fallback
       const sortedTracks = tracksWithUrls.sort((a, b) => {
@@ -125,25 +128,32 @@ export default function Playlist({
 
       onPlaylistUpdate(sortedTracks);
     } catch (error) {
-      console.error("Error loading tracks:", error);
     }
   }, [onPlaylistUpdate]);
 
   // Load tracks from IndexedDB on mount and after sync events
   useEffect(() => {
+    // Initial load
     loadTracks();
+    
+    // Also check periodically if tracks are available (for new browser scenario)
+    const checkInterval = setInterval(() => {
+      loadTracks();
+    }, 2000); // Check every 2 seconds for the first 30 seconds
+    
+    const timeoutId = setTimeout(() => {
+      clearInterval(checkInterval);
+    }, 30000);
     
     // Listen for sync completion events to reload tracks
     const handleSyncComplete = () => {
-      console.log('Sync completed, reloading tracks...');
       // Small delay to ensure IndexedDB has been updated
       setTimeout(() => {
         loadTracks();
       }, 500);
     };
     
-    const handleTracksSynced = () => {
-      console.log('Tracks synced, reloading tracks...');
+    const handleTracksSynced = (_event: Event) => {
       setTimeout(() => {
         loadTracks();
       }, 500);
@@ -156,6 +166,8 @@ export default function Playlist({
     window.addEventListener('online', handleSyncComplete);
     
     return () => {
+      clearInterval(checkInterval);
+      clearTimeout(timeoutId);
       window.removeEventListener('sync-complete', handleSyncComplete);
       window.removeEventListener('tracks-synced', handleTracksSynced);
       window.removeEventListener('initial-sync-complete', handleSyncComplete);
@@ -192,7 +204,6 @@ export default function Playlist({
           }));
           await syncTracksOrderToFirestore(trackOrders);
         } catch (error) {
-          console.error("Error syncing order to Supabase:", error);
           // Add to sync queue for later retry
           await addToSyncQueue({
             type: "UPDATE_TRACK_ORDER",
@@ -221,7 +232,6 @@ export default function Playlist({
       const orderIds = tracksToSave.map((track) => track.id);
       localStorage.setItem(TRACKS_ORDER_KEY, JSON.stringify(orderIds));
     } catch (error) {
-      console.error("Error saving tracks order:", error);
     }
   }, []);
 
@@ -237,7 +247,6 @@ export default function Playlist({
     if (tracks.length > 0 && !currentTrack) {
       const firstTrack = tracks[0];
       if (firstTrack && firstTrack.url) {
-        console.log('Auto-selecting first track:', firstTrack.title);
         onTrackSelect(firstTrack);
       }
     }
@@ -305,8 +314,7 @@ export default function Playlist({
 
               // Sync to Firestore if online, otherwise queue
               if (isOnline()) {
-                syncTracksToFirestore().catch((error) => {
-                  console.error("Error syncing track to Firestore:", error);
+                syncTracksToFirestore().catch((_error) => {
                 });
               } else {
                 addToSyncQueue({
@@ -318,15 +326,13 @@ export default function Playlist({
                     artist: newTrack.artist,
                     fileBlob: file,
                   },
-                }).catch((error) => {
-                  console.error("Error adding to sync queue:", error);
+                }).catch((_error) => {
                 });
               }
 
               newTracks.push(newTrack);
               resolve(null);
             } catch (error) {
-              console.error("Error saving track:", error);
               resolve(null);
             }
           });
@@ -391,23 +397,20 @@ export default function Playlist({
         // Sync deletion to Firestore if online, otherwise queue
         if (isOnline()) {
           import("../services/supabaseService").then(({ deleteTrack: deleteTrackFromFirestore }) => {
-            deleteTrackFromFirestore(trackId).catch((error) => {
-              console.error("Error deleting track from Firestore:", error);
+            deleteTrackFromFirestore(trackId).catch((_error) => {
             });
           });
         } else {
           addToSyncQueue({
             type: "DELETE_TRACK",
             data: { id: trackId },
-          }).catch((error) => {
-            console.error("Error adding to sync queue:", error);
+          }).catch((_error) => {
           });
         }
         
         const newTracks = tracks.filter((track) => track.id !== trackId);
         onPlaylistUpdate(newTracks);
       } catch (error) {
-        console.error("Error deleting track:", error);
       }
     },
     [tracks, onPlaylistUpdate]
@@ -548,8 +551,7 @@ export default function Playlist({
 
             // Sync to Firestore if online, otherwise queue
             if (isOnline()) {
-              syncTracksToFirestore().catch((error) => {
-                console.error("Error syncing track to Firestore:", error);
+              syncTracksToFirestore().catch((_error) => {
               });
             } else {
               addToSyncQueue({
@@ -561,15 +563,13 @@ export default function Playlist({
                   artist: newTrack.artist,
                   fileBlob: file,
                 },
-              }).catch((error) => {
-                console.error("Error adding to sync queue:", error);
+              }).catch((_error) => {
               });
             }
 
             newTracks.push(newTrack);
             resolve(null);
           } catch (error) {
-            console.error("Error saving track:", error);
             resolve(null);
           }
         });
@@ -592,12 +592,10 @@ export default function Playlist({
         try {
           const blobUrl = URL.createObjectURL(selectedTrack.file);
           const trackWithUrl = { ...selectedTrack, url: blobUrl };
-          console.log('Created blob URL for track:', selectedTrack.title);
           setShouldAutoPlay(true);
           onTrackSelect(trackWithUrl);
           return;
         } catch (error) {
-          console.error('Error creating blob URL:', error);
         }
       }
       
@@ -608,15 +606,12 @@ export default function Playlist({
                           selectedTrack.url.startsWith('https://');
         
         if (isValidUrl) {
-          console.log('Selecting track to play:', selectedTrack.title, 'URL:', selectedTrack.url);
           setShouldAutoPlay(true);
           onTrackSelect(selectedTrack);
         } else {
-          console.error('Invalid track URL format:', selectedTrack.url);
           alert('Track URL is invalid. Please try uploading the track again.');
         }
       } else {
-        console.warn('Track missing URL at index:', index, selectedTrack);
         alert('Track is missing audio file. Please try uploading the track again.');
       }
     }
@@ -633,11 +628,9 @@ export default function Playlist({
           try {
             const blobUrl = URL.createObjectURL(selectedTrack.file);
             const trackWithUrl = { ...selectedTrack, url: blobUrl };
-            console.log('Created blob URL for track:', selectedTrack.title);
             onTrackSelect(trackWithUrl);
             return;
           } catch (error) {
-            console.error('Error creating blob URL:', error);
           }
         }
         
@@ -648,18 +641,14 @@ export default function Playlist({
                             selectedTrack.url.startsWith('https://');
           
           if (isValidUrl) {
-            console.log('Selecting track:', selectedTrack.title, 'URL:', selectedTrack.url);
             onTrackSelect(selectedTrack);
           } else {
-            console.error('Invalid track URL format:', selectedTrack.url);
             alert('Track URL is invalid. Please try uploading the track again.');
           }
         } else {
-          console.warn('Track missing URL at index:', index, selectedTrack);
           alert('Track is missing audio file. Please try uploading the track again.');
         }
       } else {
-        console.warn('Track not found at index:', index);
       }
     }
   };
@@ -675,6 +664,9 @@ export default function Playlist({
   };
 
   const handleRefresh = useCallback(async () => {
+    if (isRefreshing) return; // Prevent multiple simultaneous refreshes
+    
+    setIsRefreshing(true);
     try {
       // Sync from Supabase if online
       if (isOnline()) {
@@ -683,9 +675,10 @@ export default function Playlist({
       // Reload tracks from IndexedDB
       await loadTracks();
     } catch (error) {
-      console.error("Error refreshing playlist:", error);
+    } finally {
+      setIsRefreshing(false);
     }
-  }, [loadTracks]);
+  }, [loadTracks, isRefreshing]);
 
   return (
     <div
@@ -743,11 +736,18 @@ export default function Playlist({
             />
             <button
               onClick={handleRefresh}
-              className="flex items-center justify-center px-3 py-2 text-base md:text-sm bg-gray-700 hover:bg-gray-600 rounded-md"
+              disabled={isRefreshing}
+              className={`flex items-center justify-center px-3 py-2 text-base md:text-sm bg-gray-700 hover:bg-gray-600 rounded-md transition-colors ${
+                isRefreshing ? "opacity-50 cursor-not-allowed" : ""
+              }`}
               aria-label="Refresh Playlist"
               title={t("refresh", "Refresh playlist")}
             >
-              <ArrowPathIcon className="w-5 h-5 md:w-4 md:h-4" />
+              <ArrowPathIcon
+                className={`w-5 h-5 md:w-4 md:h-4 ${
+                  isRefreshing ? "animate-spin" : ""
+                }`}
+              />
             </button>
             {tracks.length > 0 && (
               <button

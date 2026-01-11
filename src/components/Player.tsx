@@ -57,7 +57,6 @@ export default function Player({
           } catch (error) {
             // AudioContext resume requires user interaction - this is expected
             // The context will be resumed when user interacts with the page
-            console.debug('AudioContext suspended, will resume on user interaction');
           }
         }
 
@@ -81,11 +80,9 @@ export default function Player({
           await audioContextRef.current.resume();
         } catch (error) {
           // AudioContext resume requires user interaction - this is expected
-          console.debug('AudioContext suspended, will resume on user interaction');
         }
       }
     } catch (error) {
-      console.error("Error initializing audio:", error);
     }
   };
 
@@ -177,18 +174,13 @@ export default function Player({
                 audioRef.current.src = trackUrl;
                 
                 // Add error handler for audio loading
-                const handleAudioError = (e: Event) => {
-                  console.error('Error loading audio from URL:', trackUrl, e);
+                const handleAudioError = (_e: Event) => {
                   if (isSubscribed) {
                     setIsPlaying(false);
                   }
                   // Try to notify user
                   if (audioRef.current?.error) {
-                    const error = audioRef.current.error;
-                    console.error('Audio error details:', {
-                      code: error.code,
-                      message: error.message,
-                    });
+                    // Error handled silently
                   }
                 };
                 
@@ -196,7 +188,6 @@ export default function Player({
                 
                 // Add loadeddata handler to verify audio loaded successfully
                 const handleLoadedData = () => {
-                  console.log('Audio loaded successfully:', trackUrl);
                   audioRef.current?.removeEventListener('error', handleAudioError);
                 };
                 
@@ -209,7 +200,6 @@ export default function Player({
                   try {
                     await audioRef.current.play();
                   } catch (playError) {
-                    console.warn('Auto-play prevented:', playError);
                     // Reset isPlaying if play fails
                     if (isSubscribed) {
                       setIsPlaying(false);
@@ -217,10 +207,8 @@ export default function Player({
                   }
                 }
               } else {
-                console.error('Invalid track URL format:', trackUrl);
               }
             } catch (error) {
-              console.error('Error setting audio source:', error);
               if (isSubscribed) {
                 setIsPlaying(false);
               }
@@ -235,7 +223,6 @@ export default function Player({
             try {
               await audioContextRef.current.resume();
             } catch (error) {
-              console.warn("Could not resume audio context:", error);
             }
           }
           
@@ -243,7 +230,6 @@ export default function Player({
             try {
               await audioRef.current.play();
             } catch (error) {
-              console.error("Error playing audio:", error);
               if (isSubscribed) {
                 setIsPlaying(false);
               }
@@ -255,7 +241,6 @@ export default function Player({
           }
         }
       } catch (error) {
-        console.error("Error setting up track:", error);
         if (isSubscribed) {
           setIsPlaying(false);
         }
@@ -314,7 +299,6 @@ export default function Player({
   // Efecto para el visualizador
   useEffect(() => {
     if (!isAudioInitialized || !analyserRef.current || !canvasRef.current) {
-      console.log("Missing requirements for visualizer");
       return;
     }
 
@@ -339,7 +323,6 @@ export default function Player({
 
     const ctx = canvas.getContext("2d");
     if (!ctx) {
-      console.log("Failed to get canvas context");
       return;
     }
 
@@ -415,7 +398,6 @@ export default function Player({
       
       setIsPlaying(!isPlaying);
     } catch (error) {
-      console.error("Error in togglePlay:", error);
     }
   };
 

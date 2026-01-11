@@ -170,7 +170,6 @@ export const uploadTrack = async (
       throw error;
     }
   } catch (error) {
-    console.error("Error uploading track to Supabase:", error);
     throw error;
   }
 };
@@ -189,7 +188,6 @@ export const getAllTracks = async (): Promise<FirestoreTrack[]> => {
 
     return (data || []).map((track: SupabaseTrack) => convertSupabaseTrackToApp(track));
   } catch (error) {
-    console.error("Error fetching tracks from Supabase:", error);
     throw error;
   }
 };
@@ -212,7 +210,6 @@ export const getTrack = async (trackId: string): Promise<FirestoreTrack | null> 
 
     return data ? convertSupabaseTrackToApp(data as SupabaseTrack) : null;
   } catch (error) {
-    console.error("Error fetching track from Supabase:", error);
     throw error;
   }
 };
@@ -234,7 +231,6 @@ export const updateTrackOrder = async (
       throw error;
     }
   } catch (error) {
-    console.error("Error updating track order in Supabase:", error);
     throw error;
   }
 };
@@ -263,7 +259,6 @@ export const updateTracksOrder = async (
       }
     }
   } catch (error) {
-    console.error("Error updating tracks order in Supabase:", error);
     throw error;
   }
 };
@@ -289,13 +284,10 @@ export const deleteTrack = async (trackId: string): Promise<void> => {
 
       if (storageError) {
         // If file doesn't exist in storage, that's okay (might be old data)
-        console.warn("Error deleting track from storage (may not exist):", storageError);
       }
     } catch (storageError) {
-      console.warn("Error deleting track from storage:", storageError);
     }
   } catch (error) {
-    console.error("Error deleting track from Supabase:", error);
     throw error;
   }
 };
@@ -333,7 +325,6 @@ export const uploadPlaylist = async (
       throw error;
     }
   } catch (error) {
-    console.error("Error uploading playlist to Supabase:", error);
     throw error;
   }
 };
@@ -359,7 +350,6 @@ export const getAllPlaylists = async (): Promise<FirestorePlaylist[]> => {
       updatedAt: timestampToNumber(playlist.updated_at),
     }));
   } catch (error) {
-    console.error("Error fetching playlists from Supabase:", error);
     throw error;
   }
 };
@@ -395,7 +385,6 @@ export const getPlaylist = async (playlistId: string): Promise<FirestorePlaylist
       updatedAt: timestampToNumber(playlist.updated_at),
     };
   } catch (error) {
-    console.error("Error fetching playlist from Supabase:", error);
     throw error;
   }
 };
@@ -411,7 +400,6 @@ export const deletePlaylist = async (playlistId: string): Promise<void> => {
       throw error;
     }
   } catch (error) {
-    console.error("Error deleting playlist from Supabase:", error);
     throw error;
   }
 };
@@ -426,14 +414,18 @@ export const convertFirestoreTrackToDBTrack = async (
   artist?: string;
   fileBlob: Blob;
 }> => {
-  // Download file from Storage
-  const fileBlob = await downloadFileFromStorage(firestoreTrack.storageUrl);
-  
-  return {
-    id: firestoreTrack.id,
-    title: firestoreTrack.title,
-    duration: firestoreTrack.duration,
-    artist: firestoreTrack.artist,
-    fileBlob,
-  };
+  try {
+    // Download file from Storage
+    const fileBlob = await downloadFileFromStorage(firestoreTrack.storageUrl);
+    
+    return {
+      id: firestoreTrack.id,
+      title: firestoreTrack.title,
+      duration: firestoreTrack.duration,
+      artist: firestoreTrack.artist,
+      fileBlob,
+    };
+  } catch (error) {
+    throw error;
+  }
 };

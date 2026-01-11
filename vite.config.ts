@@ -17,8 +17,8 @@ export default defineConfig({
         background_color: "#ffffff",
         display: "standalone",
         orientation: "portrait",
-        scope: "/concert-planner/",
-        start_url: "/concert-planner/",
+        scope: "/",
+        start_url: "/",
         icons: [
           {
             src: "pwa-192x192.png",
@@ -40,7 +40,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
-        navigateFallback: "/concert-planner/index.html",
+        navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/_/, /\/[^/?]+\.[^/]+$/, /registerSW\.js$/],
         runtimeCaching: [
           {
@@ -73,5 +73,5 @@ export default defineConfig({
       }
     })
   ],
-  base: "/concert-planner/", // Esto hará que todas las rutas sean relativas
+  base: process.env.NODE_ENV === 'production' ? '/' : "/concert-planner/", // Use root path in production for Vercel
 });
