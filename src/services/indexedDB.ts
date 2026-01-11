@@ -12,6 +12,7 @@ export interface DBTrack {
   order?: number; // Order/position of the track in the playlist
   synced?: boolean;
   updatedAt?: number;
+  storageUrl?: string; // URL from Supabase Storage (for mobile compatibility)
 }
 
 export interface Playlist {

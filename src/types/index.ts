@@ -5,6 +5,7 @@ export interface Track {
   duration: number;
   url: string;
   file?: File;
+  storageUrl?: string; // URL from Supabase Storage (for mobile compatibility)
 }
 
 export interface PlayerState {

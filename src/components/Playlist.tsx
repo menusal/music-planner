@@ -91,35 +91,51 @@ export default function Playlist({
     try {
       const savedTracks = await getAllTracks();
       
+      // Detect if we're on mobile
+      const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      
       const tracksWithUrls: Track[] = [];
       for (const track of savedTracks) {
         if (track.fileBlob) {
           try {
-            // Create blob URL
-            const blobUrl = URL.createObjectURL(track.fileBlob);
+            // On mobile, prefer using storageUrl directly if available (avoids blob URL issues)
+            // On desktop, use blob URLs for better performance
+            let trackUrl: string;
+            let file: File | undefined;
             
-            // Determine MIME type from blob or default to audio/mpeg
-            let mimeType = track.fileBlob.type || "audio/mpeg";
-            // Ensure we have a valid audio MIME type
-            if (!mimeType.startsWith('audio/')) {
-              mimeType = "audio/mpeg";
+            if (isMobileDevice && track.storageUrl) {
+              // Use Supabase Storage URL directly on mobile
+              trackUrl = track.storageUrl;
+            } else {
+              // Create blob URL from the blob (desktop or if no storageUrl)
+              trackUrl = URL.createObjectURL(track.fileBlob);
+              
+              // Determine MIME type from blob or default to audio/mpeg
+              let mimeType = track.fileBlob.type || "audio/mpeg";
+              // Ensure we have a valid audio MIME type
+              if (!mimeType.startsWith('audio/')) {
+                mimeType = "audio/mpeg";
+              }
+              
+              // Create File object with proper MIME type for mobile compatibility
+              const fileExtension = mimeType.includes('mpeg') ? '.mp3' : 
+                                   mimeType.includes('wav') ? '.wav' :
+                                   mimeType.includes('ogg') ? '.ogg' :
+                                   mimeType.includes('aac') ? '.aac' : '.mp3';
+              
+              file = new File([track.fileBlob], track.title + fileExtension, {
+                type: mimeType,
+              });
             }
-            
-            // Create File object with proper MIME type for mobile compatibility
-            const fileExtension = mimeType.includes('mpeg') ? '.mp3' : 
-                                 mimeType.includes('wav') ? '.wav' :
-                                 mimeType.includes('ogg') ? '.ogg' :
-                                 mimeType.includes('aac') ? '.aac' : '.mp3';
             
             tracksWithUrls.push({
               id: track.id,
               title: track.title,
               duration: track.duration,
               artist: track.artist,
-              url: blobUrl,
-              file: new File([track.fileBlob], track.title + fileExtension, {
-                type: mimeType,
-              }),
+              url: trackUrl,
+              file,
+              storageUrl: track.storageUrl, // Include storageUrl for reference
             });
           } catch (error) {
           }

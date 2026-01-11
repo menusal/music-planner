@@ -682,22 +682,30 @@ export default function Player({
         const currentSrc = audioRef.current.src;
         debugLog('info', `Current audio src: ${currentSrc ? currentSrc.substring(0, 50) + '...' : 'none'}`);
         
-        // For blob URLs on mobile, try to reuse existing blob URL if it's still valid
-        // Only recreate if necessary
+        // On mobile, if we have storageUrl, use it directly instead of blob URLs
+        // Blob URLs don't work well on mobile (error code 4)
+        const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         const oldSrc = audioRef.current.src;
         let newBlobUrl: string | null = null;
         
-        if (currentTrack.url.startsWith('blob:') && currentTrack.file) {
+        // Prefer storageUrl on mobile, blob URLs on desktop
+        if (isMobileDevice && currentTrack.storageUrl) {
+          debugLog('info', `Using storageUrl on mobile: ${currentTrack.storageUrl.substring(0, 50)}...`);
+          if (!audioRef.current.src || audioRef.current.src !== currentTrack.storageUrl) {
+            audioRef.current.src = currentTrack.storageUrl;
+            debugLog('info', `Storage URL set - readyState before load: ${audioRef.current.readyState}`);
+          }
+        } else if (currentTrack.url.startsWith('blob:') && currentTrack.file) {
           debugLog('info', `File info - name: ${currentTrack.file.name}, type: ${currentTrack.file.type || 'unknown'}, size: ${currentTrack.file.size}`);
           
           // Check if current src is a blob URL and if it's different from track URL
-          // On mobile, try to reuse the existing blob URL if it exists and is valid
+          // On desktop, try to reuse the existing blob URL if it exists and is valid
           if (oldSrc && oldSrc.startsWith('blob:') && oldSrc === currentTrack.url) {
             debugLog('info', 'Reusing existing blob URL (matches track URL)');
             // Keep using the existing blob URL
             audioRef.current.src = oldSrc;
           } else {
-            debugLog('info', 'Creating new blob URL for mobile');
+            debugLog('info', 'Creating new blob URL');
             // Create new blob URL but don't revoke old one yet
             newBlobUrl = URL.createObjectURL(currentTrack.file);
             debugLog('info', `Created new blob URL: ${newBlobUrl.substring(0, 50)}...`);

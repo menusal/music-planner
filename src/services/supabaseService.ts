@@ -1,4 +1,5 @@
 import { supabase } from "../config/supabase";
+import { DBTrack } from "./indexedDB";
 
 export interface SupabaseTrack {
   id: string;
@@ -407,13 +408,7 @@ export const deletePlaylist = async (playlistId: string): Promise<void> => {
 // Utility functions for conversion (keeping same interface for compatibility)
 export const convertFirestoreTrackToDBTrack = async (
   firestoreTrack: FirestoreTrack
-): Promise<{
-  id: string;
-  title: string;
-  duration: number;
-  artist?: string;
-  fileBlob: Blob;
-}> => {
+): Promise<DBTrack> => {
   try {
     // Download file from Storage
     const fileBlob = await downloadFileFromStorage(firestoreTrack.storageUrl);
@@ -424,6 +419,10 @@ export const convertFirestoreTrackToDBTrack = async (
       duration: firestoreTrack.duration,
       artist: firestoreTrack.artist,
       fileBlob,
+      order: firestoreTrack.order,
+      synced: true,
+      updatedAt: firestoreTrack.updatedAt,
+      storageUrl: firestoreTrack.storageUrl, // Save storage URL for mobile compatibility
     };
   } catch (error) {
     throw error;
