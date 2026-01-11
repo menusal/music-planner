@@ -277,7 +277,7 @@ export default function Player({
                 }
                 
                 // Add error handler for audio loading
-                const handleAudioError = (_e: Event) => {
+                const handleAudioError = async (_e: Event) => {
                   if (isSubscribed) {
                     setIsPlaying(false);
                   }
@@ -304,26 +304,45 @@ export default function Player({
                         errorMessage = `Audio error (code ${error.code}): ${error.message || 'Unknown error'}`;
                     }
                     
-                    // On mobile or for blob URLs, try to recreate blob URL with proper MIME type
-                    if (currentTrack?.file && trackUrl.startsWith('blob:')) {
+                    debugLog('error', `playTrack: Audio error - code: ${error.code}, message: ${errorMessage}`);
+                    
+                    // If error code 4 and we have storageUrl, try downloading and creating blob URL
+                    if (error.code === 4 && currentTrack?.storageUrl && !currentTrack.storageUrl.startsWith('blob:')) {
                       try {
-                        // Revoke old blob URL
-                        URL.revokeObjectURL(trackUrl);
-                        // Create new blob URL (MIME type is handled by the File object)
-                        const newBlobUrl = URL.createObjectURL(currentTrack.file);
-                        audioRef.current.src = newBlobUrl;
-                        audioRef.current.load();
-                        // Try playing again after a short delay
-                        setTimeout(() => {
-                          if (isSubscribed && isPlaying && audioRef.current) {
-                            audioRef.current.play().catch(() => {
-                              alert(errorMessage + '\n\nPlease try selecting the track again.');
-                            });
-                          }
-                        }, 200);
+                        debugLog('info', 'playTrack: Attempting to download file from storageUrl and create blob URL');
+                        const response = await fetch(currentTrack.storageUrl);
+                        
+                        if (!response.ok) {
+                          throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        
+                        const blob = await response.blob();
+                        debugLog('info', `playTrack: File downloaded, creating blob URL`);
+                        
+                        // Revoke old URL if it was a blob
+                        if (audioRef.current.src && audioRef.current.src.startsWith('blob:')) {
+                          URL.revokeObjectURL(audioRef.current.src);
+                        }
+                        
+                        // Create blob URL from downloaded file
+                        const downloadedBlobUrl = URL.createObjectURL(blob);
+                        if (audioRef.current) {
+                          audioRef.current.src = downloadedBlobUrl;
+                          audioRef.current.load();
+                          debugLog('info', `playTrack: Downloaded blob URL set, attempting to play`);
+                          
+                          // Try playing after load
+                          setTimeout(() => {
+                            if (isSubscribed && isPlaying && audioRef.current && audioRef.current.readyState >= 2) {
+                              audioRef.current.play().catch(() => {
+                                debugLog('error', 'playTrack: Play failed after download');
+                              });
+                            }
+                          }, 200);
+                        }
                         return; // Don't show error if we're retrying
-                      } catch (retryError) {
-                        // If retry fails, show error
+                      } catch (downloadError: any) {
+                        debugLog('error', `playTrack: Download failed: ${downloadError?.message}`);
                       }
                     }
                     
@@ -752,51 +771,86 @@ export default function Player({
           debugLog('info', `togglePlay: loadedmetadata event - readyState: ${audioRef.current?.readyState}, duration: ${audioRef.current?.duration}`);
         };
         
-        const handleError = () => {
+        const handleError = async () => {
           errorFired = true;
           const error = audioRef.current?.error;
           debugLog('error', `togglePlay: error event - code: ${error?.code}, message: ${error?.message || 'No message'}`);
           
           // Don't revoke old blob URL if there's an error - might need it
-          // If error code 4 (SRC_NOT_SUPPORTED) and we have the file, try different approaches
-          if (error?.code === 4 && currentTrack.file) {
-            debugLog('info', 'Error code 4 detected, trying alternative approaches');
+          // If error code 4 (SRC_NOT_SUPPORTED), try downloading the file and creating a local blob URL
+          if (error?.code === 4) {
+            debugLog('info', 'togglePlay: Error code 4 detected, trying to download file and create local blob URL');
             
-            // Revoke the failed blob URL
-            if (newBlobUrl) {
-              URL.revokeObjectURL(newBlobUrl);
-            }
-            
-            // Try approach 1: Create blob directly from file (simpler)
-            try {
-              const fileType = currentTrack.file.type || 'audio/mpeg';
-              debugLog('info', `Attempt 1: Creating blob directly from file with MIME type: ${fileType}`);
-              const blob = new Blob([currentTrack.file], { type: fileType });
-              const retryBlobUrl1 = URL.createObjectURL(blob);
-              if (audioRef.current) {
-                audioRef.current.src = retryBlobUrl1;
-                audioRef.current.load();
-                debugLog('info', `Retry blob URL 1 created: ${retryBlobUrl1.substring(0, 50)}...`);
+            // If we have storageUrl, try downloading it
+            if (currentTrack.storageUrl && !currentTrack.storageUrl.startsWith('blob:')) {
+              try {
+                debugLog('info', `togglePlay: Downloading file from storageUrl: ${currentTrack.storageUrl.substring(0, 50)}...`);
+                const response = await fetch(currentTrack.storageUrl);
                 
-                // Set up error handler for this attempt
-                const handleRetryError = () => {
-                  const retryError = audioRef.current?.error;
-                  debugLog('error', `Retry attempt 1 failed - code: ${retryError?.code}`);
+                if (!response.ok) {
+                  throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const blob = await response.blob();
+                debugLog('info', `togglePlay: File downloaded, size: ${blob.size}, type: ${blob.type}`);
+                
+                // Revoke old URL if it was a blob
+                if (newBlobUrl) {
+                  URL.revokeObjectURL(newBlobUrl);
+                }
+                if (oldSrc && oldSrc.startsWith('blob:')) {
+                  URL.revokeObjectURL(oldSrc);
+                }
+                
+                // Create blob URL from downloaded file
+                const downloadedBlobUrl = URL.createObjectURL(blob);
+                if (audioRef.current) {
+                  audioRef.current.src = downloadedBlobUrl;
+                  audioRef.current.load();
+                  debugLog('info', `togglePlay: Downloaded blob URL created: ${downloadedBlobUrl.substring(0, 50)}...`);
                   
-                  // Try approach 2: Use file directly without blob wrapper
-                  if (audioRef.current && currentTrack.file) {
-                    debugLog('info', 'Attempt 2: Using file directly with createObjectURL');
-                    URL.revokeObjectURL(retryBlobUrl1);
-                    const directBlobUrl = URL.createObjectURL(currentTrack.file);
-                    audioRef.current.src = directBlobUrl;
-                    audioRef.current.load();
-                    debugLog('info', `Direct blob URL created: ${directBlobUrl.substring(0, 50)}...`);
+                  // Set up error handler for this attempt
+                  const handleDownloadError = () => {
+                    const downloadError = audioRef.current?.error;
+                    debugLog('error', `togglePlay: Downloaded blob URL failed - code: ${downloadError?.code}`);
+                  };
+                  audioRef.current.addEventListener('error', handleDownloadError, { once: true });
+                }
+              } catch (downloadError: any) {
+                debugLog('error', `togglePlay: Failed to download file: ${downloadError?.message}`);
+                
+                // Fallback: try with file if available
+                if (currentTrack.file) {
+                  debugLog('info', 'togglePlay: Fallback: Using file directly');
+                  try {
+                    const fileType = currentTrack.file.type || 'audio/mpeg';
+                    const blob = new Blob([currentTrack.file], { type: fileType });
+                    const fallbackBlobUrl = URL.createObjectURL(blob);
+                    if (audioRef.current) {
+                      audioRef.current.src = fallbackBlobUrl;
+                      audioRef.current.load();
+                      debugLog('info', `togglePlay: Fallback blob URL created: ${fallbackBlobUrl.substring(0, 50)}...`);
+                    }
+                  } catch (fallbackError: any) {
+                    debugLog('error', `togglePlay: Fallback also failed: ${fallbackError?.message}`);
                   }
-                };
-                audioRef.current.addEventListener('error', handleRetryError, { once: true });
+                }
               }
-            } catch (retryError: any) {
-              debugLog('error', `Failed retry attempt 1: ${retryError?.message}`);
+            } else if (currentTrack.file) {
+              // If we have the file, try creating blob from it
+              debugLog('info', 'togglePlay: Attempting to create blob from file');
+              try {
+                const fileType = currentTrack.file.type || 'audio/mpeg';
+                const blob = new Blob([currentTrack.file], { type: fileType });
+                const retryBlobUrl = URL.createObjectURL(blob);
+                if (audioRef.current) {
+                  audioRef.current.src = retryBlobUrl;
+                  audioRef.current.load();
+                  debugLog('info', `togglePlay: Retry blob URL created: ${retryBlobUrl.substring(0, 50)}...`);
+                }
+              } catch (retryError: any) {
+                debugLog('error', `togglePlay: Failed to create blob from file: ${retryError?.message}`);
+              }
             }
           }
         };
