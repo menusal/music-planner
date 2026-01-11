@@ -705,48 +705,87 @@ export default function Player({
         
         // Add event listeners before loading
         let errorFired = false;
+        let canPlayFired = false;
+        let loadStartFired = false;
+        
+        const handleLoadStart = () => {
+          loadStartFired = true;
+          debugLog('info', 'togglePlay: loadstart event');
+        };
+        
+        const handleCanPlay = () => {
+          canPlayFired = true;
+          debugLog('info', `togglePlay: canplay event - readyState: ${audioRef.current?.readyState}`);
+          // Now it's safe to revoke old blob URL if we created a new one
+          if (newBlobUrl && oldSrc && oldSrc.startsWith('blob:') && oldSrc !== newBlobUrl) {
+            debugLog('info', 'canplay fired, revoking old blob URL');
+            URL.revokeObjectURL(oldSrc);
+          }
+        };
+        
+        const handleLoadedMetadata = () => {
+          debugLog('info', `togglePlay: loadedmetadata event - readyState: ${audioRef.current?.readyState}, duration: ${audioRef.current?.duration}`);
+        };
+        
         const handleError = () => {
           errorFired = true;
           const error = audioRef.current?.error;
           debugLog('error', `togglePlay: error event - code: ${error?.code}, message: ${error?.message || 'No message'}`);
           
-          // If error code 4 (SRC_NOT_SUPPORTED) and we have the file, try recreating blob URL with explicit MIME type
-          if (error?.code === 4 && currentTrack.file && newBlobUrl) {
-            debugLog('info', 'Error code 4 detected, trying to recreate blob URL with explicit MIME type');
-            // Revoke the failed blob URL
-            URL.revokeObjectURL(newBlobUrl);
+          // Don't revoke old blob URL if there's an error - might need it
+          // If error code 4 (SRC_NOT_SUPPORTED) and we have the file, try recreating blob URL
+          if (error?.code === 4 && currentTrack.file) {
+            debugLog('info', 'Error code 4 detected, trying alternative approach');
             
-            // Try creating a new blob with explicit MIME type
+            // Revoke the failed blob URL
+            if (newBlobUrl) {
+              URL.revokeObjectURL(newBlobUrl);
+            }
+            
+            // Try creating a new blob with explicit MIME type and different approach
             try {
               const fileType = currentTrack.file.type || 'audio/mpeg';
               debugLog('info', `Creating new blob with explicit MIME type: ${fileType}`);
-              const blob = new Blob([currentTrack.file], { type: fileType });
-              const retryBlobUrl = URL.createObjectURL(blob);
-              if (audioRef.current) {
-                audioRef.current.src = retryBlobUrl;
-                audioRef.current.load();
-                debugLog('info', `Retry blob URL created and loaded: ${retryBlobUrl.substring(0, 50)}...`);
-              }
+              
+              // Read file as ArrayBuffer first, then create blob
+              const reader = new FileReader();
+              reader.onload = () => {
+                if (reader.result && audioRef.current) {
+                  const blob = new Blob([reader.result], { type: fileType });
+                  const retryBlobUrl = URL.createObjectURL(blob);
+                  debugLog('info', `Retry blob URL created from ArrayBuffer: ${retryBlobUrl.substring(0, 50)}...`);
+                  audioRef.current.src = retryBlobUrl;
+                  audioRef.current.load();
+                }
+              };
+              reader.onerror = () => {
+                debugLog('error', 'FileReader failed to read file');
+              };
+              reader.readAsArrayBuffer(currentTrack.file);
             } catch (retryError: any) {
               debugLog('error', `Failed to create retry blob: ${retryError?.message}`);
             }
           }
         };
         
+        audioRef.current.addEventListener('loadstart', handleLoadStart, { once: true });
+        audioRef.current.addEventListener('canplay', handleCanPlay, { once: true });
+        audioRef.current.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
         audioRef.current.addEventListener('error', handleError, { once: true });
         
         debugLog('info', 'Calling audio.load()...');
         audioRef.current.load();
         debugLog('info', `load() called - readyState immediately after: ${audioRef.current.readyState}`);
         
-        // Wait a bit and check if error occurred
+        // Wait and check status - but DON'T revoke old blob URL until canplay fires or we confirm error
         setTimeout(() => {
-          if (!errorFired && newBlobUrl && oldSrc && oldSrc.startsWith('blob:') && oldSrc !== newBlobUrl) {
-            debugLog('info', 'No error after 100ms, revoking old blob URL');
-            URL.revokeObjectURL(oldSrc);
+          debugLog('info', `Status after 200ms - readyState: ${audioRef.current?.readyState}, paused: ${audioRef.current?.paused}, loadStart: ${loadStartFired}, canPlay: ${canPlayFired}, error: ${errorFired}`);
+          // Only revoke old blob URL if canplay fired (audio is ready)
+          // If error fired, don't revoke - might need the old URL
+          if (!canPlayFired && !errorFired && newBlobUrl && oldSrc && oldSrc.startsWith('blob:') && oldSrc !== newBlobUrl) {
+            debugLog('info', 'Audio still loading, keeping old blob URL for now');
           }
-          debugLog('info', `readyState after 100ms: ${audioRef.current?.readyState}, paused: ${audioRef.current?.paused}, error: ${errorFired}`);
-        }, 100);
+        }, 200);
       }
       
       // Toggle play/pause
