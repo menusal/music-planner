@@ -10,7 +10,6 @@ import {
   SpeakerXMarkIcon,
 } from "@heroicons/react/24/solid";
 import { Track } from "../types";
-import { debugLog } from "./DebugPanel";
 import { supabase } from "../config/supabase";
 
 interface PlayerProps {
@@ -211,16 +210,13 @@ export default function Player({
 
     const playTrack = async () => {
       if (!audioRef.current) {
-        debugLog('warn', 'playTrack: audioRef.current is null');
         return;
       }
 
       try {
-        debugLog('info', `playTrack effect - currentTrack: ${currentTrack?.title || 'none'}, isPlaying: ${isPlaying}, urlChanged: checking...`);
         
         // Solo inicializamos si es necesario
         if (!isAudioInitialized) {
-          debugLog('info', 'playTrack: Initializing audio...');
           await initializeAudio();
         }
 
@@ -257,18 +253,15 @@ export default function Player({
                 const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
                 
                 if (isMobileDevice && currentTrack?.storageUrl) {
-                  debugLog('info', `playTrack: Using storageUrl on mobile: ${currentTrack.storageUrl.substring(0, 50)}...`);
                   // Use storageUrl directly on mobile
                   if (!audioRef.current.src || audioRef.current.src !== currentTrack.storageUrl) {
                     audioRef.current.src = currentTrack.storageUrl;
                   }
                 } else if (trackUrl.startsWith('blob:') && currentTrack?.file) {
-                  debugLog('info', `playTrack: Recreating blob URL - file type: ${currentTrack.file.type}, size: ${currentTrack.file.size}`);
                   // Recreate blob URL to ensure it's fresh and valid (desktop)
                   // Don't revoke old URL yet - wait until new one is confirmed working
                   const newBlobUrl = URL.createObjectURL(currentTrack.file);
                   audioRef.current.src = newBlobUrl;
-                  debugLog('info', `playTrack: New blob URL set: ${newBlobUrl.substring(0, 50)}...`);
                   // MIME type is handled by the File/blob object, no need to set on audio element
                 } else {
                   // Set the audio source directly for HTTP/HTTPS URLs
@@ -305,12 +298,10 @@ export default function Player({
                         errorMessage = `Audio error (code ${error.code}): ${error.message || 'Unknown error'}`;
                     }
                     
-                    debugLog('error', `playTrack: Audio error - code: ${error.code}, message: ${errorMessage}`);
                     
                     // If error code 4 and we have storageUrl, try downloading using Supabase Storage API
                     if (error.code === 4 && currentTrack?.storageUrl && !currentTrack.storageUrl.startsWith('blob:')) {
                       try {
-                        debugLog('info', 'playTrack: Attempting to download file from Supabase Storage');
                         
                         // Extract path from storageUrl
                         let path = currentTrack.storageUrl;
@@ -321,7 +312,6 @@ export default function Player({
                           }
                         }
                         
-                        debugLog('info', `playTrack: Downloading path: ${path}`);
                         
                         // Use Supabase Storage download method
                         const { data: blob, error: downloadError } = await supabase.storage
@@ -336,7 +326,6 @@ export default function Player({
                           throw new Error('No data returned from Supabase Storage');
                         }
                         
-                        debugLog('info', `playTrack: File downloaded from Supabase, size: ${blob.size}, type: ${blob.type}`);
                         
                         // Revoke old URL if it was a blob
                         if (audioRef.current.src && audioRef.current.src.startsWith('blob:')) {
@@ -348,20 +337,17 @@ export default function Player({
                         if (audioRef.current) {
                           audioRef.current.src = downloadedBlobUrl;
                           audioRef.current.load();
-                          debugLog('info', `playTrack: Downloaded blob URL set, attempting to play`);
                           
                           // Try playing after load
                           setTimeout(() => {
                             if (isSubscribed && isPlaying && audioRef.current && audioRef.current.readyState >= 2) {
                               audioRef.current.play().catch(() => {
-                                debugLog('error', 'playTrack: Play failed after download');
                               });
                             }
                           }, 200);
                         }
                         return; // Don't show error if we're retrying
                       } catch (downloadError: any) {
-                        debugLog('error', `playTrack: Supabase download failed: ${downloadError?.message}`);
                       }
                     }
                     
@@ -389,36 +375,27 @@ export default function Player({
                 
                 // Add loadedmetadata handler
                 const handleLoadedMetadata = () => {
-                  debugLog('info', `loadedmetadata event - readyState: ${audioRef.current?.readyState}, duration: ${audioRef.current?.duration}`);
                 };
                 
                 // Add loadstart handler
                 const handleLoadStart = () => {
-                  debugLog('info', 'loadstart event - Audio loading started');
                 };
                 
                 // Add progress handler
                 const handleProgress = () => {
-                  if (audioRef.current) {
-                    const buffered = audioRef.current.buffered;
-                    const bufferedLength = buffered && buffered.length > 0 ? buffered.end(0) : 0;
-                    debugLog('info', `progress event - readyState: ${audioRef.current.readyState}, buffered: ${bufferedLength}`);
-                  }
+                  // Progress handler
                 };
                 
                 // Add stalled handler (when loading stops)
                 const handleStalled = () => {
-                  debugLog('warn', 'stalled event - Audio loading stalled');
                 };
                 
                 // Add suspend handler
                 const handleSuspend = () => {
-                  debugLog('warn', 'suspend event - Audio loading suspended');
                 };
                 
                 // Add abort handler
                 const handleAbort = () => {
-                  debugLog('warn', 'abort event - Audio loading aborted');
                 };
                 
                 // Add all event listeners
@@ -432,11 +409,9 @@ export default function Player({
                 audioRef.current.addEventListener('abort', handleAbort, { once: true });
                 
                 // Log the source URL before loading
-                debugLog('info', `About to load audio - src: ${audioRef.current.src.substring(0, 100)}...`);
                 
                 // Load the audio source
                 audioRef.current.load();
-                debugLog('info', `load() called - readyState after load: ${audioRef.current.readyState}`);
                 
                 // Auto-play if isPlaying is true and audio is ready (only if URL actually changed)
                 // Also check if user has interacted (required for mobile autoplay policies)
@@ -489,30 +464,23 @@ export default function Player({
         // Handle play/pause - only if audio source is set and ready
         // Only handle play/pause if URL hasn't changed (to avoid conflicts with new track loading)
         if (!urlChanged && audioRef.current.src) {
-          debugLog('info', `playTrack: Handling play/pause - isPlaying: ${isPlaying}, paused: ${audioRef.current.paused}, readyState: ${audioRef.current.readyState}`);
           
           if (isPlaying && isSubscribed && currentTrack) {
             // Resume audio context if needed
             if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
               try {
-                debugLog('info', 'playTrack: Resuming AudioContext...');
                 await audioContextRef.current.resume();
-                debugLog('info', `playTrack: AudioContext resumed, state: ${audioContextRef.current.state}`);
               } catch (error: any) {
-                debugLog('error', `playTrack: Failed to resume AudioContext: ${error?.message}`);
               }
             }
             
             // Only try to play if audio is paused, ready, and we're not already attempting to play
             if (audioRef.current.paused && audioRef.current.readyState >= 2 && !playAttemptRef.current) {
-              debugLog('info', 'playTrack: Attempting to play...');
               playAttemptRef.current = true;
               try {
                 await audioRef.current.play();
-                debugLog('info', `playTrack: Playback started - paused: ${audioRef.current.paused}, currentTime: ${audioRef.current.currentTime}`);
                 playAttemptRef.current = false;
               } catch (playError: any) {
-                debugLog('error', `playTrack: Play failed: ${playError?.name} - ${playError?.message}`);
                 playAttemptRef.current = false;
                 if (isSubscribed) {
                   setIsPlaying(false);
@@ -520,15 +488,12 @@ export default function Player({
                 }
               }
             } else {
-              debugLog('info', `playTrack: Skipping play - paused: ${audioRef.current.paused}, readyState: ${audioRef.current.readyState}, playAttempt: ${playAttemptRef.current}`);
             }
           } else if (!isPlaying && audioRef.current && !audioRef.current.paused) {
-            debugLog('info', 'playTrack: Pausing audio');
             audioRef.current.pause();
             isPlayingRef.current = false;
           }
         } else {
-          debugLog('info', `playTrack: Skipping play/pause - urlChanged: ${urlChanged}, hasSrc: ${!!audioRef.current?.src}`);
         }
       } catch (error) {
         if (isSubscribed) {
@@ -672,22 +637,17 @@ export default function Player({
 
   const togglePlay = async () => {
     try {
-      debugLog('info', `togglePlay called - isPlaying: ${isPlaying}, hasTrack: ${!!currentTrack}`);
       
       // Mark user interaction (critical for mobile autoplay policies)
       userInteractedRef.current = true;
-      debugLog('info', 'User interaction marked');
       
       // Initialize audio on user interaction (play button click)
       if (!isAudioInitialized) {
-        debugLog('info', 'Initializing audio...');
         await initializeAudio();
-        debugLog('info', `Audio initialized - AudioContext state: ${audioContextRef.current?.state}`);
       }
       
       // Si no hay currentTrack pero hay playlist, comenzar con la primera canción
       if (!currentTrack && playlist.length > 0) {
-        debugLog('info', 'No current track, selecting first track from playlist');
         onTrackChange(playlist[0]);
         isPlayingRef.current = true;
         setIsPlaying(true);
@@ -695,39 +655,30 @@ export default function Player({
       }
       
       if (!currentTrack) {
-        debugLog('warn', 'No current track available');
         return;
       }
       
-      debugLog('info', `Current track: ${currentTrack.title}, URL: ${currentTrack.url ? 'exists' : 'missing'}, hasFile: ${!!currentTrack.file}`);
       
       // Ensure track has a valid URL
       if (!currentTrack.url && currentTrack.file) {
-        debugLog('info', 'Creating blob URL from file');
         const blobUrl = URL.createObjectURL(currentTrack.file);
         const trackWithUrl = { ...currentTrack, url: blobUrl };
         onTrackChange(trackWithUrl);
-        debugLog('info', `Blob URL created: ${blobUrl.substring(0, 50)}...`);
       }
       
       // Resume audio context if suspended (required for user interaction, especially on mobile)
       if (audioContextRef.current) {
         const contextState = audioContextRef.current.state;
-        debugLog('info', `AudioContext state: ${contextState}`);
         if (contextState === 'suspended') {
           try {
             await audioContextRef.current.resume();
-            debugLog('info', `AudioContext resumed, new state: ${audioContextRef.current.state}`);
           } catch (error: any) {
-            debugLog('error', `Failed to resume AudioContext: ${error?.message}`);
           }
         }
       }
       
       // Ensure audio source is set
       if (audioRef.current && currentTrack.url) {
-        const currentSrc = audioRef.current.src;
-        debugLog('info', `Current audio src: ${currentSrc ? currentSrc.substring(0, 50) + '...' : 'none'}`);
         
         // On mobile, if we have storageUrl, use it directly instead of blob URLs
         // Blob URLs don't work well on mobile (error code 4)
@@ -737,73 +688,57 @@ export default function Player({
         
         // Prefer storageUrl on mobile, blob URLs on desktop
         if (isMobileDevice && currentTrack.storageUrl) {
-          debugLog('info', `Using storageUrl on mobile: ${currentTrack.storageUrl.substring(0, 50)}...`);
           if (!audioRef.current.src || audioRef.current.src !== currentTrack.storageUrl) {
             audioRef.current.src = currentTrack.storageUrl;
-            debugLog('info', `Storage URL set - readyState before load: ${audioRef.current.readyState}`);
           }
         } else if (currentTrack.url.startsWith('blob:') && currentTrack.file) {
-          debugLog('info', `File info - name: ${currentTrack.file.name}, type: ${currentTrack.file.type || 'unknown'}, size: ${currentTrack.file.size}`);
           
           // Check if current src is a blob URL and if it's different from track URL
           // On desktop, try to reuse the existing blob URL if it exists and is valid
           if (oldSrc && oldSrc.startsWith('blob:') && oldSrc === currentTrack.url) {
-            debugLog('info', 'Reusing existing blob URL (matches track URL)');
             // Keep using the existing blob URL
             audioRef.current.src = oldSrc;
           } else {
-            debugLog('info', 'Creating new blob URL');
             // Create new blob URL but don't revoke old one yet
             newBlobUrl = URL.createObjectURL(currentTrack.file);
-            debugLog('info', `Created new blob URL: ${newBlobUrl.substring(0, 50)}...`);
             
             // Set the new source
             audioRef.current.src = newBlobUrl;
-            debugLog('info', `New blob URL set - readyState before load: ${audioRef.current.readyState}`);
           }
         } else if (!audioRef.current.src || audioRef.current.src !== currentTrack.url) {
           audioRef.current.src = currentTrack.url;
-          debugLog('info', `Audio src updated to track URL - readyState before load: ${audioRef.current.readyState}`);
         }
         
         // Add event listeners before loading
         let errorFired = false;
         let canPlayFired = false;
-        let loadStartFired = false;
         
         const handleLoadStart = () => {
-          loadStartFired = true;
-          debugLog('info', 'togglePlay: loadstart event');
+          // Load start handler
         };
         
         const handleCanPlay = () => {
           canPlayFired = true;
-          debugLog('info', `togglePlay: canplay event - readyState: ${audioRef.current?.readyState}`);
           // Now it's safe to revoke old blob URL if we created a new one
           if (newBlobUrl && oldSrc && oldSrc.startsWith('blob:') && oldSrc !== newBlobUrl) {
-            debugLog('info', 'canplay fired, revoking old blob URL');
             URL.revokeObjectURL(oldSrc);
           }
         };
         
         const handleLoadedMetadata = () => {
-          debugLog('info', `togglePlay: loadedmetadata event - readyState: ${audioRef.current?.readyState}, duration: ${audioRef.current?.duration}`);
         };
         
         const handleError = async () => {
           errorFired = true;
           const error = audioRef.current?.error;
-          debugLog('error', `togglePlay: error event - code: ${error?.code}, message: ${error?.message || 'No message'}`);
           
           // Don't revoke old blob URL if there's an error - might need it
           // If error code 4 (SRC_NOT_SUPPORTED), try downloading the file and creating a local blob URL
           if (error?.code === 4) {
-            debugLog('info', 'togglePlay: Error code 4 detected, trying to download file and create local blob URL');
             
             // If we have storageUrl, try downloading it using Supabase Storage API
             if (currentTrack.storageUrl && !currentTrack.storageUrl.startsWith('blob:')) {
               try {
-                debugLog('info', `togglePlay: Downloading file from Supabase Storage`);
                 
                 // Extract path from storageUrl
                 let path = currentTrack.storageUrl;
@@ -814,7 +749,6 @@ export default function Player({
                   }
                 }
                 
-                debugLog('info', `togglePlay: Downloading path: ${path}`);
                 
                 // Use Supabase Storage download method
                 const { data: blob, error: downloadError } = await supabase.storage
@@ -829,7 +763,6 @@ export default function Player({
                   throw new Error('No data returned from Supabase Storage');
                 }
                 
-                debugLog('info', `togglePlay: File downloaded from Supabase, size: ${blob.size}, type: ${blob.type}`);
                 
                 // Revoke old URL if it was a blob
                 if (newBlobUrl) {
@@ -844,21 +777,17 @@ export default function Player({
                 if (audioRef.current) {
                   audioRef.current.src = downloadedBlobUrl;
                   audioRef.current.load();
-                  debugLog('info', `togglePlay: Downloaded blob URL created: ${downloadedBlobUrl.substring(0, 50)}...`);
                   
                   // Set up error handler for this attempt
                   const handleDownloadError = () => {
-                    const downloadError = audioRef.current?.error;
-                    debugLog('error', `togglePlay: Downloaded blob URL failed - code: ${downloadError?.code}`);
+                    // Error handler for downloaded blob URL
                   };
                   audioRef.current.addEventListener('error', handleDownloadError, { once: true });
                 }
               } catch (downloadError: any) {
-                debugLog('error', `togglePlay: Supabase download failed: ${downloadError?.message}`);
                 
                 // Fallback: try with file if available
                 if (currentTrack.file) {
-                  debugLog('info', 'togglePlay: Fallback: Using file directly');
                   try {
                     const fileType = currentTrack.file.type || 'audio/mpeg';
                     const blob = new Blob([currentTrack.file], { type: fileType });
@@ -866,16 +795,13 @@ export default function Player({
                     if (audioRef.current) {
                       audioRef.current.src = fallbackBlobUrl;
                       audioRef.current.load();
-                      debugLog('info', `togglePlay: Fallback blob URL created: ${fallbackBlobUrl.substring(0, 50)}...`);
                     }
                   } catch (fallbackError: any) {
-                    debugLog('error', `togglePlay: Fallback also failed: ${fallbackError?.message}`);
                   }
                 }
               }
             } else if (currentTrack.file) {
               // If we have the file, try creating blob from it
-              debugLog('info', 'togglePlay: Attempting to create blob from file');
               try {
                 const fileType = currentTrack.file.type || 'audio/mpeg';
                 const blob = new Blob([currentTrack.file], { type: fileType });
@@ -883,10 +809,8 @@ export default function Player({
                 if (audioRef.current) {
                   audioRef.current.src = retryBlobUrl;
                   audioRef.current.load();
-                  debugLog('info', `togglePlay: Retry blob URL created: ${retryBlobUrl.substring(0, 50)}...`);
                 }
               } catch (retryError: any) {
-                debugLog('error', `togglePlay: Failed to create blob from file: ${retryError?.message}`);
               }
             }
           }
@@ -897,31 +821,25 @@ export default function Player({
         audioRef.current.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
         audioRef.current.addEventListener('error', handleError, { once: true });
         
-        debugLog('info', 'Calling audio.load()...');
         audioRef.current.load();
-        debugLog('info', `load() called - readyState immediately after: ${audioRef.current.readyState}`);
         
         // Wait and check status - but DON'T revoke old blob URL until canplay fires or we confirm error
         setTimeout(() => {
-          debugLog('info', `Status after 200ms - readyState: ${audioRef.current?.readyState}, paused: ${audioRef.current?.paused}, loadStart: ${loadStartFired}, canPlay: ${canPlayFired}, error: ${errorFired}`);
           // Only revoke old blob URL if canplay fired (audio is ready)
           // If error fired, don't revoke - might need the old URL
           if (!canPlayFired && !errorFired && newBlobUrl && oldSrc && oldSrc.startsWith('blob:') && oldSrc !== newBlobUrl) {
-            debugLog('info', 'Audio still loading, keeping old blob URL for now');
           }
         }, 200);
       }
       
       // Toggle play/pause
       if (isPlaying) {
-        debugLog('info', 'Pausing audio');
         if (audioRef.current && !audioRef.current.paused) {
           audioRef.current.pause();
         }
         isPlayingRef.current = false;
         setIsPlaying(false);
       } else {
-        debugLog('info', 'Starting playback');
         isPlayingRef.current = true;
         setIsPlaying(true);
         
@@ -932,17 +850,11 @@ export default function Player({
         const tryPlay = async () => {
           if (audioRef.current) {
             const readyState = audioRef.current.readyState;
-            const paused = audioRef.current.paused;
-            const hasSrc = !!audioRef.current.src;
-            const src = audioRef.current.src;
             
             tryPlayAttempts++;
-            debugLog('info', `tryPlay attempt ${tryPlayAttempts}/${MAX_ATTEMPTS} - readyState: ${readyState}, paused: ${paused}, hasSrc: ${hasSrc}, src: ${src ? src.substring(0, 50) + '...' : 'none'}`);
             
             // Check if there's an error
             if (audioRef.current.error) {
-              const error = audioRef.current.error;
-              debugLog('error', `Audio has error - code: ${error.code}, message: ${error.message}`);
               isPlayingRef.current = false;
               setIsPlaying(false);
               return;
@@ -950,23 +862,17 @@ export default function Player({
             
             if (readyState >= 2) {
               try {
-                debugLog('info', 'Calling audio.play()...');
                 await audioRef.current.play();
-                debugLog('info', `Playback started successfully - paused: ${audioRef.current.paused}, currentTime: ${audioRef.current.currentTime}`);
                 
                 // Add event listeners to track playback state
                 const handlePlay = () => {
-                  debugLog('info', 'Audio play event fired');
                 };
                 const handlePause = () => {
-                  debugLog('warn', 'Audio pause event fired');
                 };
                 const handleEnded = () => {
-                  debugLog('info', 'Audio ended event fired');
                 };
                 const handleError = () => {
-                  const error = audioRef.current?.error;
-                  debugLog('error', `Audio error event - code: ${error?.code}, message: ${error?.message}`);
+                  // Error handler
                 };
                 
                 audioRef.current.addEventListener('play', handlePlay, { once: true });
@@ -974,29 +880,24 @@ export default function Player({
                 audioRef.current.addEventListener('ended', handleEnded, { once: true });
                 audioRef.current.addEventListener('error', handleError, { once: true });
               } catch (playError: any) {
-                debugLog('error', `Play failed: ${playError?.name} - ${playError?.message}`);
                 // Play failed, reset state
                 isPlayingRef.current = false;
                 setIsPlaying(false);
               }
             } else if (tryPlayAttempts < MAX_ATTEMPTS) {
-              debugLog('info', `Audio not ready (readyState: ${readyState}), waiting...`);
               // Audio not ready yet, wait a bit more
               setTimeout(tryPlay, 50);
             } else {
-              debugLog('error', `Audio never became ready after ${MAX_ATTEMPTS} attempts. readyState stuck at ${readyState}`);
               // Give up after max attempts
               isPlayingRef.current = false;
               setIsPlaying(false);
             }
           } else {
-            debugLog('warn', 'audioRef.current is null in tryPlay');
           }
         };
         await tryPlay();
       }
     } catch (error: any) {
-      debugLog('error', `togglePlay error: ${error?.name} - ${error?.message}`);
       isPlayingRef.current = false;
       setIsPlaying(false);
     }

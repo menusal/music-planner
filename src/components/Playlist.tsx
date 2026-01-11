@@ -16,7 +16,6 @@ import { syncTracksToFirestore, isOnline, performFullSync, syncTracksOrderToFire
 import { addToSyncQueue } from "../services/syncQueue";
 import SyncStatus from "./SyncStatus";
 import { supabase } from "../config/supabase";
-import { debugLog } from "./DebugPanel";
 
 interface PlaylistProps {
   tracks: Track[];
@@ -95,7 +94,6 @@ export default function Playlist({
       
       // Detect if we're on mobile
       const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      debugLog('info', `loadTracks: Is mobile device: ${isMobileDevice}`);
       
       const tracksWithUrls: Track[] = [];
       for (const track of savedTracks) {
@@ -106,7 +104,6 @@ export default function Playlist({
             
             // Always create blob URL from fileBlob if available (works on both mobile and desktop)
             if (track.fileBlob && track.fileBlob.size > 0) {
-              debugLog('info', `loadTracks: Creating blob URL from fileBlob for track ${track.id}, size: ${track.fileBlob.size}`);
               trackUrl = URL.createObjectURL(track.fileBlob);
               
               // Determine MIME type from blob or default to audio/mpeg
@@ -126,10 +123,8 @@ export default function Playlist({
                 type: mimeType,
               });
               
-              debugLog('info', `loadTracks: Blob URL created for track ${track.id}: ${trackUrl.substring(0, 50)}...`);
             } else if (isMobileDevice && track.storageUrl) {
               // Fallback: If no fileBlob but we have storageUrl on mobile, download it
-              debugLog('info', `loadTracks: No fileBlob, downloading from storageUrl for track ${track.id}`);
               try {
                 // Extract path from storageUrl
                 let path = track.storageUrl;
@@ -149,7 +144,6 @@ export default function Playlist({
                   throw new Error(downloadError?.message || 'No data returned');
                 }
                 
-                debugLog('info', `loadTracks: Downloaded file for track ${track.id}, size: ${blob.size}, type: ${blob.type}`);
                 
                 // Create blob URL from downloaded file
                 trackUrl = URL.createObjectURL(blob);
@@ -165,14 +159,11 @@ export default function Playlist({
                   type: mimeType,
                 });
                 
-                debugLog('info', `loadTracks: Blob URL created from download for track ${track.id}: ${trackUrl.substring(0, 50)}...`);
               } catch (downloadError: any) {
-                debugLog('error', `loadTracks: Failed to download track ${track.id}: ${downloadError?.message}`);
                 // Skip this track if download fails
                 continue;
               }
             } else {
-              debugLog('warn', `loadTracks: Track ${track.id} has no fileBlob and no storageUrl, skipping`);
               continue;
             }
             
@@ -186,10 +177,8 @@ export default function Playlist({
               storageUrl: track.storageUrl, // Include storageUrl for reference
             });
           } catch (error: any) {
-            debugLog('error', `loadTracks: Error processing track ${track.id}: ${error?.message}`);
           }
         } else {
-          debugLog('warn', `loadTracks: Track ${track.id} has no fileBlob`);
         }
       }
 
