@@ -4,6 +4,7 @@ import Home from "./pages/Home";
 import InstallPrompt from "./components/InstallPrompt";
 import ServiceWorkerUpdater from "./components/ServiceWorkerUpdater";
 import OfflineIndicator from "./components/OfflineIndicator";
+import DebugPanel from "./components/DebugPanel";
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
       </Routes>
       <InstallPrompt />
       <ServiceWorkerUpdater />
+      <DebugPanel />
     </>
   );
 }

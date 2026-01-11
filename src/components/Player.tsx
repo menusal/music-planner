@@ -10,6 +10,7 @@ import {
   SpeakerXMarkIcon,
 } from "@heroicons/react/24/solid";
 import { Track } from "../types";
+import { debugLog } from "./DebugPanel";
 
 interface PlayerProps {
   currentTrack: Track | null;
@@ -208,11 +209,17 @@ export default function Player({
     let isSubscribed = true;
 
     const playTrack = async () => {
-      if (!audioRef.current) return;
+      if (!audioRef.current) {
+        debugLog('warn', 'playTrack: audioRef.current is null');
+        return;
+      }
 
       try {
+        debugLog('info', `playTrack effect - currentTrack: ${currentTrack?.title || 'none'}, isPlaying: ${isPlaying}, urlChanged: checking...`);
+        
         // Solo inicializamos si es necesario
         if (!isAudioInitialized) {
+          debugLog('info', 'playTrack: Initializing audio...');
           await initializeAudio();
         }
 
@@ -397,34 +404,46 @@ export default function Player({
         // Handle play/pause - only if audio source is set and ready
         // Only handle play/pause if URL hasn't changed (to avoid conflicts with new track loading)
         if (!urlChanged && audioRef.current.src) {
+          debugLog('info', `playTrack: Handling play/pause - isPlaying: ${isPlaying}, paused: ${audioRef.current.paused}, readyState: ${audioRef.current.readyState}`);
+          
           if (isPlaying && isSubscribed && currentTrack) {
             // Resume audio context if needed
             if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
               try {
+                debugLog('info', 'playTrack: Resuming AudioContext...');
                 await audioContextRef.current.resume();
-              } catch (_error) {
-                // AudioContext resume requires user interaction - this is expected
+                debugLog('info', `playTrack: AudioContext resumed, state: ${audioContextRef.current.state}`);
+              } catch (error: any) {
+                debugLog('error', `playTrack: Failed to resume AudioContext: ${error?.message}`);
               }
             }
             
             // Only try to play if audio is paused, ready, and we're not already attempting to play
             if (audioRef.current.paused && audioRef.current.readyState >= 2 && !playAttemptRef.current) {
+              debugLog('info', 'playTrack: Attempting to play...');
               playAttemptRef.current = true;
               try {
                 await audioRef.current.play();
+                debugLog('info', `playTrack: Playback started - paused: ${audioRef.current.paused}, currentTime: ${audioRef.current.currentTime}`);
                 playAttemptRef.current = false;
-              } catch (playError) {
+              } catch (playError: any) {
+                debugLog('error', `playTrack: Play failed: ${playError?.name} - ${playError?.message}`);
                 playAttemptRef.current = false;
                 if (isSubscribed) {
                   setIsPlaying(false);
                   isPlayingRef.current = false;
                 }
               }
+            } else {
+              debugLog('info', `playTrack: Skipping play - paused: ${audioRef.current.paused}, readyState: ${audioRef.current.readyState}, playAttempt: ${playAttemptRef.current}`);
             }
           } else if (!isPlaying && audioRef.current && !audioRef.current.paused) {
+            debugLog('info', 'playTrack: Pausing audio');
             audioRef.current.pause();
             isPlayingRef.current = false;
           }
+        } else {
+          debugLog('info', `playTrack: Skipping play/pause - urlChanged: ${urlChanged}, hasSrc: ${!!audioRef.current?.src}`);
         }
       } catch (error) {
         if (isSubscribed) {
@@ -568,16 +587,22 @@ export default function Player({
 
   const togglePlay = async () => {
     try {
+      debugLog('info', `togglePlay called - isPlaying: ${isPlaying}, hasTrack: ${!!currentTrack}`);
+      
       // Mark user interaction (critical for mobile autoplay policies)
       userInteractedRef.current = true;
+      debugLog('info', 'User interaction marked');
       
       // Initialize audio on user interaction (play button click)
       if (!isAudioInitialized) {
+        debugLog('info', 'Initializing audio...');
         await initializeAudio();
+        debugLog('info', `Audio initialized - AudioContext state: ${audioContextRef.current?.state}`);
       }
       
       // Si no hay currentTrack pero hay playlist, comenzar con la primera canción
       if (!currentTrack && playlist.length > 0) {
+        debugLog('info', 'No current track, selecting first track from playlist');
         onTrackChange(playlist[0]);
         isPlayingRef.current = true;
         setIsPlaying(true);
@@ -585,71 +610,123 @@ export default function Player({
       }
       
       if (!currentTrack) {
+        debugLog('warn', 'No current track available');
         return;
       }
       
+      debugLog('info', `Current track: ${currentTrack.title}, URL: ${currentTrack.url ? 'exists' : 'missing'}, hasFile: ${!!currentTrack.file}`);
+      
       // Ensure track has a valid URL
       if (!currentTrack.url && currentTrack.file) {
+        debugLog('info', 'Creating blob URL from file');
         const blobUrl = URL.createObjectURL(currentTrack.file);
         const trackWithUrl = { ...currentTrack, url: blobUrl };
         onTrackChange(trackWithUrl);
+        debugLog('info', `Blob URL created: ${blobUrl.substring(0, 50)}...`);
       }
       
       // Resume audio context if suspended (required for user interaction, especially on mobile)
-      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-        try {
-          await audioContextRef.current.resume();
-        } catch (_error) {
-          // AudioContext resume may fail, try to continue anyway
+      if (audioContextRef.current) {
+        const contextState = audioContextRef.current.state;
+        debugLog('info', `AudioContext state: ${contextState}`);
+        if (contextState === 'suspended') {
+          try {
+            await audioContextRef.current.resume();
+            debugLog('info', `AudioContext resumed, new state: ${audioContextRef.current.state}`);
+          } catch (error: any) {
+            debugLog('error', `Failed to resume AudioContext: ${error?.message}`);
+          }
         }
       }
       
       // Ensure audio source is set
       if (audioRef.current && currentTrack.url) {
+        const currentSrc = audioRef.current.src;
+        debugLog('info', `Current audio src: ${currentSrc ? currentSrc.substring(0, 50) + '...' : 'none'}`);
+        
         // For blob URLs on mobile, recreate if we have the file
         if (currentTrack.url.startsWith('blob:') && currentTrack.file) {
+          debugLog('info', 'Recreating blob URL for mobile');
           if (audioRef.current.src && audioRef.current.src.startsWith('blob:')) {
             URL.revokeObjectURL(audioRef.current.src);
           }
           const newBlobUrl = URL.createObjectURL(currentTrack.file);
           audioRef.current.src = newBlobUrl;
+          debugLog('info', `New blob URL set: ${newBlobUrl.substring(0, 50)}...`);
         } else if (!audioRef.current.src || audioRef.current.src !== currentTrack.url) {
           audioRef.current.src = currentTrack.url;
+          debugLog('info', 'Audio src updated to track URL');
         }
+        
+        debugLog('info', 'Loading audio...');
         await audioRef.current.load();
+        debugLog('info', `Audio loaded - readyState: ${audioRef.current.readyState}, paused: ${audioRef.current.paused}`);
       }
       
       // Toggle play/pause
       if (isPlaying) {
+        debugLog('info', 'Pausing audio');
         if (audioRef.current && !audioRef.current.paused) {
           audioRef.current.pause();
         }
         isPlayingRef.current = false;
         setIsPlaying(false);
       } else {
+        debugLog('info', 'Starting playback');
         isPlayingRef.current = true;
         setIsPlaying(true);
+        
         // Try to play immediately - wait for audio to be ready
         const tryPlay = async () => {
           if (audioRef.current) {
-            if (audioRef.current.readyState >= 2) {
+            const readyState = audioRef.current.readyState;
+            const paused = audioRef.current.paused;
+            debugLog('info', `tryPlay - readyState: ${readyState}, paused: ${paused}, hasSrc: ${!!audioRef.current.src}`);
+            
+            if (readyState >= 2) {
               try {
+                debugLog('info', 'Calling audio.play()...');
                 await audioRef.current.play();
-              } catch (playError) {
+                debugLog('info', `Playback started successfully - paused: ${audioRef.current.paused}, currentTime: ${audioRef.current.currentTime}`);
+                
+                // Add event listeners to track playback state
+                const handlePlay = () => {
+                  debugLog('info', 'Audio play event fired');
+                };
+                const handlePause = () => {
+                  debugLog('warn', 'Audio pause event fired');
+                };
+                const handleEnded = () => {
+                  debugLog('info', 'Audio ended event fired');
+                };
+                const handleError = () => {
+                  const error = audioRef.current?.error;
+                  debugLog('error', `Audio error event - code: ${error?.code}, message: ${error?.message}`);
+                };
+                
+                audioRef.current.addEventListener('play', handlePlay, { once: true });
+                audioRef.current.addEventListener('pause', handlePause, { once: true });
+                audioRef.current.addEventListener('ended', handleEnded, { once: true });
+                audioRef.current.addEventListener('error', handleError, { once: true });
+              } catch (playError: any) {
+                debugLog('error', `Play failed: ${playError?.name} - ${playError?.message}`);
                 // Play failed, reset state
                 isPlayingRef.current = false;
                 setIsPlaying(false);
               }
             } else {
+              debugLog('info', `Audio not ready (readyState: ${readyState}), waiting...`);
               // Audio not ready yet, wait a bit more
               setTimeout(tryPlay, 50);
             }
+          } else {
+            debugLog('warn', 'audioRef.current is null in tryPlay');
           }
         };
         await tryPlay();
       }
-    } catch (_error) {
-      // Error handled
+    } catch (error: any) {
+      debugLog('error', `togglePlay error: ${error?.name} - ${error?.message}`);
       isPlayingRef.current = false;
       setIsPlaying(false);
     }
