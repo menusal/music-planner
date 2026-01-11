@@ -8,7 +8,7 @@ interface LogEntry {
 }
 
 // Version number - increment this when deploying a new version
-const DEBUG_PANEL_VERSION = '1.0.3';
+const DEBUG_PANEL_VERSION = '1.0.4';
 
 const DebugPanel = () => {
   const [isOpen, setIsOpen] = useState(false);
