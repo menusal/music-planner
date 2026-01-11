@@ -52,7 +52,13 @@ export default function Player({
         
         // Only resume if context is suspended (requires user interaction)
         if (audioContextRef.current.state === 'suspended') {
-          await audioContextRef.current.resume();
+          try {
+            await audioContextRef.current.resume();
+          } catch (error) {
+            // AudioContext resume requires user interaction - this is expected
+            // The context will be resumed when user interacts with the page
+            console.debug('AudioContext suspended, will resume on user interaction');
+          }
         }
 
         analyserRef.current = audioContextRef.current.createAnalyser();
@@ -71,7 +77,12 @@ export default function Player({
         audioContextRef.current &&
         audioContextRef.current.state === "suspended"
       ) {
-        await audioContextRef.current.resume();
+        try {
+          await audioContextRef.current.resume();
+        } catch (error) {
+          // AudioContext resume requires user interaction - this is expected
+          console.debug('AudioContext suspended, will resume on user interaction');
+        }
       }
     } catch (error) {
       console.error("Error initializing audio:", error);

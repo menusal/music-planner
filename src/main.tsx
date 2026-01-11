@@ -7,44 +7,25 @@ import { BrowserRouter } from "react-router-dom";
 import "./config/supabase"; // Initialize Supabase
 import { startPeriodicSync, performFullSync } from "./services/syncService";
 
-// Register service worker
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/concert-planner/sw.js')
-      .then((registration) => {
-        console.log('SW registered: ', registration);
-        
-        // Listen for service worker updates
-        registration.addEventListener('updatefound', () => {
-          const newWorker = registration.installing;
-          if (newWorker) {
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                // New service worker is available
-                window.dispatchEvent(new CustomEvent('sw-update-available', {
-                  detail: registration
-                }));
-              }
-            });
-          }
-        });
-      })
-      .catch((registrationError) => {
-        console.log('SW registration failed: ', registrationError);
-      });
-  });
-}
+// Service worker is automatically registered by VitePWA plugin
+// with registerType: "autoUpdate" in vite.config.ts
 
 // Initialize sync service
 window.addEventListener('load', () => {
   // Start periodic sync
   startPeriodicSync();
   
-  // Perform initial sync if online
+  // Perform initial sync if online (this will load tracks from Supabase)
   if (navigator.onLine) {
-    performFullSync().catch((error) => {
-      console.error('Error in initial sync:', error);
-    });
+    performFullSync()
+      .then(() => {
+        console.log('Initial sync completed');
+        // Dispatch event to notify components that initial sync is done
+        window.dispatchEvent(new CustomEvent('initial-sync-complete'));
+      })
+      .catch((error) => {
+        console.error('Error in initial sync:', error);
+      });
   }
 });
 

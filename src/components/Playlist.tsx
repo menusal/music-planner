@@ -129,9 +129,38 @@ export default function Playlist({
     }
   }, [onPlaylistUpdate]);
 
-  // Cargar tracks de IndexedDB y aplicar orden guardado
+  // Load tracks from IndexedDB on mount and after sync events
   useEffect(() => {
     loadTracks();
+    
+    // Listen for sync completion events to reload tracks
+    const handleSyncComplete = () => {
+      console.log('Sync completed, reloading tracks...');
+      // Small delay to ensure IndexedDB has been updated
+      setTimeout(() => {
+        loadTracks();
+      }, 500);
+    };
+    
+    const handleTracksSynced = () => {
+      console.log('Tracks synced, reloading tracks...');
+      setTimeout(() => {
+        loadTracks();
+      }, 500);
+    };
+    
+    // Listen for custom sync events
+    window.addEventListener('sync-complete', handleSyncComplete);
+    window.addEventListener('tracks-synced', handleTracksSynced);
+    window.addEventListener('initial-sync-complete', handleSyncComplete);
+    window.addEventListener('online', handleSyncComplete);
+    
+    return () => {
+      window.removeEventListener('sync-complete', handleSyncComplete);
+      window.removeEventListener('tracks-synced', handleTracksSynced);
+      window.removeEventListener('initial-sync-complete', handleSyncComplete);
+      window.removeEventListener('online', handleSyncComplete);
+    };
   }, [loadTracks]);
 
   // Save order to IndexedDB and sync to Supabase when tracks are reordered

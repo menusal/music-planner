@@ -78,6 +78,11 @@ export const syncTracksFromFirestore = async (): Promise<void> => {
         await deleteTrackFromIndexedDB(indexedDBTrack.id);
       }
     }
+    
+    // Dispatch event to notify that tracks were synced
+    if (firestoreTracks.length > 0) {
+      window.dispatchEvent(new CustomEvent('tracks-synced'));
+    }
   } catch (error) {
     console.error("Error syncing tracks from Firestore:", error);
     throw error;
@@ -320,6 +325,9 @@ export const performFullSync = async (): Promise<void> => {
 
     // Process any queued operations
     await processSyncQueue();
+    
+    // Dispatch event to notify that sync is complete
+    window.dispatchEvent(new CustomEvent('sync-complete'));
   } catch (error) {
     console.error("Error performing full sync:", error);
     throw error;
