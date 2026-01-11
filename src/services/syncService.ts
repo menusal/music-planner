@@ -153,11 +153,16 @@ export const syncTracksToFirestore = async (): Promise<void> => {
           (track as any).order ?? 0
         );
 
-        // Mark as synced
+        // Get the track from Supabase to retrieve the storageUrl
+        const { getTrack } = await import("./supabaseService");
+        const syncedTrack = await getTrack(track.id);
+        
+        // Mark as synced with storageUrl if available
         await saveTrackToIndexedDB({
           ...track,
           synced: true,
           updatedAt: Date.now(),
+          storageUrl: syncedTrack?.storageUrl, // Save storageUrl for mobile compatibility
         } as any);
       } catch (error) {
         // Don't throw, continue with other tracks
@@ -283,10 +288,15 @@ export const processSyncQueue = async (): Promise<void> => {
               trackData.fileBlob,
               trackData.order ?? 0
             );
+            // Get the track from Supabase to retrieve the storageUrl
+            const { getTrack } = await import("./supabaseService");
+            const syncedTrack = await getTrack(trackData.id);
+            
             await saveTrackToIndexedDB({
               ...trackData,
               synced: true,
               updatedAt: Date.now(),
+              storageUrl: syncedTrack?.storageUrl, // Save storageUrl for mobile compatibility
             } as any);
             await removeFromSyncQueue(operation.id);
             break;

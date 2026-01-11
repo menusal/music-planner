@@ -106,7 +106,11 @@ export default function Playlist({
             if (isMobileDevice && track.storageUrl) {
               // Use Supabase Storage URL directly on mobile
               trackUrl = track.storageUrl;
+              console.log(`[loadTracks] Using storageUrl for mobile track ${track.id}: ${trackUrl.substring(0, 50)}...`);
             } else {
+              if (isMobileDevice) {
+                console.log(`[loadTracks] Track ${track.id} - isMobile: true, but no storageUrl available. Using blob URL instead.`);
+              }
               // Create blob URL from the blob (desktop or if no storageUrl)
               trackUrl = URL.createObjectURL(track.fileBlob);
               

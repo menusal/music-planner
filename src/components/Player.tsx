@@ -251,21 +251,30 @@ export default function Player({
             try {
               // Test if URL is valid
               if (trackUrl.startsWith('blob:') || trackUrl.startsWith('http://') || trackUrl.startsWith('https://')) {
-                // For blob URLs, always recreate if we have the file (especially important on mobile)
-                if (trackUrl.startsWith('blob:') && currentTrack?.file) {
+                // On mobile, use storageUrl directly if available (avoids blob URL issues)
+                // On desktop, use blob URLs
+                const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                
+                if (isMobileDevice && currentTrack?.storageUrl) {
+                  debugLog('info', `playTrack: Using storageUrl on mobile: ${currentTrack.storageUrl.substring(0, 50)}...`);
+                  // Use storageUrl directly on mobile
+                  if (!audioRef.current.src || audioRef.current.src !== currentTrack.storageUrl) {
+                    audioRef.current.src = currentTrack.storageUrl;
+                  }
+                } else if (trackUrl.startsWith('blob:') && currentTrack?.file) {
                   debugLog('info', `playTrack: Recreating blob URL - file type: ${currentTrack.file.type}, size: ${currentTrack.file.size}`);
-                  // Recreate blob URL to ensure it's fresh and valid (especially important on mobile)
+                  // Recreate blob URL to ensure it's fresh and valid (desktop)
                   // Don't revoke old URL yet - wait until new one is confirmed working
                   const newBlobUrl = URL.createObjectURL(currentTrack.file);
                   audioRef.current.src = newBlobUrl;
                   debugLog('info', `playTrack: New blob URL set: ${newBlobUrl.substring(0, 50)}...`);
                   // MIME type is handled by the File/blob object, no need to set on audio element
-                  } else {
-                    // Set the audio source directly for HTTP/HTTPS URLs
-                    if (!audioRef.current.src || audioRef.current.src !== trackUrl) {
-                      audioRef.current.src = trackUrl;
-                    }
+                } else {
+                  // Set the audio source directly for HTTP/HTTPS URLs
+                  if (!audioRef.current.src || audioRef.current.src !== trackUrl) {
+                    audioRef.current.src = trackUrl;
                   }
+                }
                 
                 // Add error handler for audio loading
                 const handleAudioError = (_e: Event) => {
