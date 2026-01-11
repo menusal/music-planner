@@ -11,6 +11,7 @@ import {
 } from "@heroicons/react/24/solid";
 import { Track } from "../types";
 import { debugLog } from "./DebugPanel";
+import { supabase } from "../config/supabase";
 
 interface PlayerProps {
   currentTrack: Track | null;
@@ -306,18 +307,36 @@ export default function Player({
                     
                     debugLog('error', `playTrack: Audio error - code: ${error.code}, message: ${errorMessage}`);
                     
-                    // If error code 4 and we have storageUrl, try downloading and creating blob URL
+                    // If error code 4 and we have storageUrl, try downloading using Supabase Storage API
                     if (error.code === 4 && currentTrack?.storageUrl && !currentTrack.storageUrl.startsWith('blob:')) {
                       try {
-                        debugLog('info', 'playTrack: Attempting to download file from storageUrl and create blob URL');
-                        const response = await fetch(currentTrack.storageUrl);
+                        debugLog('info', 'playTrack: Attempting to download file from Supabase Storage');
                         
-                        if (!response.ok) {
-                          throw new Error(`HTTP error! status: ${response.status}`);
+                        // Extract path from storageUrl
+                        let path = currentTrack.storageUrl;
+                        if (path.includes('/storage/v1/object/public/')) {
+                          const parts = path.split('/storage/v1/object/public/');
+                          if (parts.length > 1) {
+                            path = parts[1].replace('music-planner/', '');
+                          }
                         }
                         
-                        const blob = await response.blob();
-                        debugLog('info', `playTrack: File downloaded, creating blob URL`);
+                        debugLog('info', `playTrack: Downloading path: ${path}`);
+                        
+                        // Use Supabase Storage download method
+                        const { data: blob, error: downloadError } = await supabase.storage
+                          .from('music-planner')
+                          .download(path);
+                        
+                        if (downloadError) {
+                          throw new Error(`Supabase download error: ${downloadError.message}`);
+                        }
+                        
+                        if (!blob) {
+                          throw new Error('No data returned from Supabase Storage');
+                        }
+                        
+                        debugLog('info', `playTrack: File downloaded from Supabase, size: ${blob.size}, type: ${blob.type}`);
                         
                         // Revoke old URL if it was a blob
                         if (audioRef.current.src && audioRef.current.src.startsWith('blob:')) {
@@ -342,7 +361,7 @@ export default function Player({
                         }
                         return; // Don't show error if we're retrying
                       } catch (downloadError: any) {
-                        debugLog('error', `playTrack: Download failed: ${downloadError?.message}`);
+                        debugLog('error', `playTrack: Supabase download failed: ${downloadError?.message}`);
                       }
                     }
                     
@@ -781,18 +800,36 @@ export default function Player({
           if (error?.code === 4) {
             debugLog('info', 'togglePlay: Error code 4 detected, trying to download file and create local blob URL');
             
-            // If we have storageUrl, try downloading it
+            // If we have storageUrl, try downloading it using Supabase Storage API
             if (currentTrack.storageUrl && !currentTrack.storageUrl.startsWith('blob:')) {
               try {
-                debugLog('info', `togglePlay: Downloading file from storageUrl: ${currentTrack.storageUrl.substring(0, 50)}...`);
-                const response = await fetch(currentTrack.storageUrl);
+                debugLog('info', `togglePlay: Downloading file from Supabase Storage`);
                 
-                if (!response.ok) {
-                  throw new Error(`HTTP error! status: ${response.status}`);
+                // Extract path from storageUrl
+                let path = currentTrack.storageUrl;
+                if (path.includes('/storage/v1/object/public/')) {
+                  const parts = path.split('/storage/v1/object/public/');
+                  if (parts.length > 1) {
+                    path = parts[1].replace('music-planner/', '');
+                  }
                 }
                 
-                const blob = await response.blob();
-                debugLog('info', `togglePlay: File downloaded, size: ${blob.size}, type: ${blob.type}`);
+                debugLog('info', `togglePlay: Downloading path: ${path}`);
+                
+                // Use Supabase Storage download method
+                const { data: blob, error: downloadError } = await supabase.storage
+                  .from('music-planner')
+                  .download(path);
+                
+                if (downloadError) {
+                  throw new Error(`Supabase download error: ${downloadError.message}`);
+                }
+                
+                if (!blob) {
+                  throw new Error('No data returned from Supabase Storage');
+                }
+                
+                debugLog('info', `togglePlay: File downloaded from Supabase, size: ${blob.size}, type: ${blob.type}`);
                 
                 // Revoke old URL if it was a blob
                 if (newBlobUrl) {
@@ -817,7 +854,7 @@ export default function Player({
                   audioRef.current.addEventListener('error', handleDownloadError, { once: true });
                 }
               } catch (downloadError: any) {
-                debugLog('error', `togglePlay: Failed to download file: ${downloadError?.message}`);
+                debugLog('error', `togglePlay: Supabase download failed: ${downloadError?.message}`);
                 
                 // Fallback: try with file if available
                 if (currentTrack.file) {
