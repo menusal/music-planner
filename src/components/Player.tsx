@@ -89,25 +89,57 @@ export default function Player({
   // Mover playNextTrack aquí, antes de los efectos
   const playNextTrack = useCallback(() => {
     if (!currentTrack || playlist.length === 0) return;
+    
+    // Prevent multiple simultaneous calls
+    if (isAutoChangingRef.current) return;
+    isAutoChangingRef.current = true;
 
     const currentIndex = playlist.findIndex(
       (track) => track.id === currentTrack.id
     );
+    
+    // If we're at the last track and not repeating, stop playback
+    if (currentIndex === playlist.length - 1 && !isRepeating) {
+      setIsPlaying(false);
+      isAutoChangingRef.current = false;
+      return;
+    }
+    
     let nextIndex;
 
     if (isShuffled) {
-      nextIndex = Math.floor(Math.random() * playlist.length);
+      let newIndex;
+      do {
+        newIndex = Math.floor(Math.random() * playlist.length);
+      } while (newIndex === currentIndex && playlist.length > 1);
+      nextIndex = newIndex;
     } else {
       nextIndex = (currentIndex + 1) % playlist.length;
     }
 
+    // Stop current audio before changing track to prevent conflicts
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    
+    // Change track
     onTrackChange(playlist[nextIndex]);
-    setIsPlaying(true);
-  }, [currentTrack, playlist, isShuffled, onTrackChange]);
+    // Set isPlaying after a delay to ensure track change is processed
+    // The useEffect will handle setting isPlaying when track changes
+    setTimeout(() => {
+      isAutoChangingRef.current = false;
+    }, 300);
+  }, [currentTrack, playlist, isShuffled, isRepeating, onTrackChange]);
 
   // Track when currentTrack changes
   const prevTrackRef = useRef<Track | null>(null);
+  const prevTrackUrlRef = useRef<string>(''); // Track the URL to detect actual changes
   const userInteractedRef = useRef(false);
+  // Track to prevent auto-play loops when track changes automatically
+  const isAutoChangingRef = useRef(false);
+  const isPlayingRef = useRef(false); // Track playing state to prevent loops
+  const playAttemptRef = useRef(false); // Track if we're currently attempting to play
   
   // Track user interaction to enable audio playback
   useEffect(() => {
@@ -125,15 +157,30 @@ export default function Player({
   }, []);
   
   useEffect(() => {
+    // Update playing ref when isPlaying changes
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+  
+  useEffect(() => {
     // If track changed and user has interacted, auto-play
     if (currentTrack && currentTrack.id !== prevTrackRef.current?.id) {
       prevTrackRef.current = currentTrack;
-      // Set isPlaying to true - the effect will handle playback
-      if (userInteractedRef.current || shouldAutoPlay) {
+      
+      // Only auto-play if user has interacted or shouldAutoPlay is true
+      // Skip if we're in the middle of an automatic track change
+      if (!isAutoChangingRef.current && (userInteractedRef.current || shouldAutoPlay)) {
+        isPlayingRef.current = true;
         setIsPlaying(true);
         if (shouldAutoPlay && onAutoPlayHandled) {
           onAutoPlayHandled();
         }
+      } else if (isAutoChangingRef.current) {
+        // If it's an automatic change, set playing state after a delay
+        setTimeout(() => {
+          isPlayingRef.current = true;
+          setIsPlaying(true);
+          isAutoChangingRef.current = false;
+        }, 200);
       }
     }
   }, [currentTrack, shouldAutoPlay, onAutoPlayHandled]);
@@ -158,15 +205,23 @@ export default function Player({
         }
 
         // Solo actualizamos la fuente si ha cambiado la pista o la URL
+        let urlChanged = false;
         if (currentTrack && currentTrack.url) {
-          const currentSrc = audioRef.current.src || '';
           const trackUrl = currentTrack.url;
           
-          // Check if URL has changed - compare the actual URLs
-          // Handle blob URLs and regular URLs
-          const urlChanged = !currentSrc || currentSrc !== trackUrl;
+          // Check if URL has actually changed - compare with previous URL
+          urlChanged = prevTrackUrlRef.current !== trackUrl;
           
           if (urlChanged && trackUrl) {
+            // Update the ref to track the current URL
+            prevTrackUrlRef.current = trackUrl;
+            
+            // Stop and reset current audio before loading new one
+            if (audioRef.current && !audioRef.current.paused) {
+              audioRef.current.pause();
+            }
+            audioRef.current.currentTime = 0;
+            playAttemptRef.current = false; // Reset play attempt flag
             // Validate URL before setting
             try {
               // Test if URL is valid
@@ -246,10 +301,16 @@ export default function Player({
                 
                 // Add canplay handler to ensure audio is ready
                 const handleCanPlay = () => {
-                  if (isSubscribed && isPlaying && audioRef.current) {
-                    audioRef.current.play().catch((_playError) => {
+                  // Only auto-play if isPlaying is true, we're subscribed, and not already attempting to play
+                  if (isSubscribed && isPlayingRef.current && audioRef.current && audioRef.current.paused && !playAttemptRef.current) {
+                    playAttemptRef.current = true;
+                    audioRef.current.play().then(() => {
+                      playAttemptRef.current = false;
+                    }).catch((_playError) => {
+                      playAttemptRef.current = false;
                       if (isSubscribed) {
                         setIsPlaying(false);
+                        isPlayingRef.current = false;
                       }
                     });
                   }
@@ -267,21 +328,27 @@ export default function Player({
                 // Load the audio source
                 audioRef.current.load();
                 
-                // Auto-play if isPlaying is true and audio is ready
-                if (isSubscribed && isPlaying) {
-                  // Wait a bit for the audio to start loading
-                  setTimeout(async () => {
-                    if (audioRef.current && audioRef.current.readyState >= 2) {
-                      try {
-                        await audioRef.current.play();
-                      } catch (playError) {
-                        // Reset isPlaying if play fails
+                // Auto-play if isPlaying is true and audio is ready (only if URL actually changed)
+                if (isSubscribed && isPlayingRef.current && !playAttemptRef.current) {
+                  // Wait for the audio to be ready
+                  const tryPlay = () => {
+                    if (audioRef.current && audioRef.current.readyState >= 2 && audioRef.current.paused && !playAttemptRef.current) {
+                      playAttemptRef.current = true;
+                      audioRef.current.play().then(() => {
+                        playAttemptRef.current = false;
+                      }).catch((_playError) => {
+                        playAttemptRef.current = false;
                         if (isSubscribed) {
                           setIsPlaying(false);
+                          isPlayingRef.current = false;
                         }
-                      }
+                      });
+                    } else if (audioRef.current && audioRef.current.readyState < 2) {
+                      // Audio not ready yet, wait a bit more
+                      setTimeout(tryPlay, 50);
                     }
-                  }, 100);
+                  };
+                  setTimeout(tryPlay, 100);
                 }
               } else {
                 throw new Error('Invalid track URL format');
@@ -294,28 +361,36 @@ export default function Player({
           }
         }
 
-        // Manejamos la reproducción/pausa
-        if (isPlaying && isSubscribed && currentTrack && audioRef.current.src) {
-          // Resume audio context if needed
-          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-            try {
-              await audioContextRef.current.resume();
-            } catch (error) {
-            }
-          }
-          
-          if (audioRef.current.paused) {
-            try {
-              await audioRef.current.play();
-            } catch (error) {
-              if (isSubscribed) {
-                setIsPlaying(false);
+        // Handle play/pause - only if audio source is set and ready
+        // Only handle play/pause if URL hasn't changed (to avoid conflicts with new track loading)
+        if (!urlChanged && audioRef.current.src) {
+          if (isPlaying && isSubscribed && currentTrack) {
+            // Resume audio context if needed
+            if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+              try {
+                await audioContextRef.current.resume();
+              } catch (_error) {
+                // AudioContext resume requires user interaction - this is expected
               }
             }
-          }
-        } else {
-          if (!audioRef.current.paused) {
+            
+            // Only try to play if audio is paused, ready, and we're not already attempting to play
+            if (audioRef.current.paused && audioRef.current.readyState >= 2 && !playAttemptRef.current) {
+              playAttemptRef.current = true;
+              try {
+                await audioRef.current.play();
+                playAttemptRef.current = false;
+              } catch (playError) {
+                playAttemptRef.current = false;
+                if (isSubscribed) {
+                  setIsPlaying(false);
+                  isPlayingRef.current = false;
+                }
+              }
+            }
+          } else if (!isPlaying && audioRef.current && !audioRef.current.paused) {
             audioRef.current.pause();
+            isPlayingRef.current = false;
           }
         }
       } catch (error) {
@@ -349,11 +424,18 @@ export default function Player({
       };
 
       const handleEnded = () => {
-        if (isRepeating) {
-          audio.currentTime = 0;
-          audio.play();
-        } else {
-          playNextTrack();
+        // Prevent multiple calls by checking if audio is still at the end
+        if (audio.ended && !isAutoChangingRef.current) {
+          if (isRepeating) {
+            audio.currentTime = 0;
+            audio.play().catch(() => {
+              // If play fails, try playNextTrack as fallback
+              playNextTrack();
+            });
+          } else {
+            // Call playNextTrack which will handle the track change
+            playNextTrack();
+          }
         }
       };
 
