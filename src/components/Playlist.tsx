@@ -15,6 +15,8 @@ import { getAllTracks, saveTrack, deleteTrack } from "../services/indexedDB";
 import { syncTracksToFirestore, isOnline, performFullSync, syncTracksOrderToFirestore } from "../services/syncService";
 import { addToSyncQueue } from "../services/syncQueue";
 import SyncStatus from "./SyncStatus";
+import { supabase } from "../config/supabase";
+import { debugLog } from "./DebugPanel";
 
 interface PlaylistProps {
   tracks: Track[];
@@ -93,25 +95,18 @@ export default function Playlist({
       
       // Detect if we're on mobile
       const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      debugLog('info', `loadTracks: Is mobile device: ${isMobileDevice}`);
       
       const tracksWithUrls: Track[] = [];
       for (const track of savedTracks) {
         if (track.fileBlob) {
           try {
-            // On mobile, prefer using storageUrl directly if available (avoids blob URL issues)
-            // On desktop, use blob URLs for better performance
             let trackUrl: string;
             let file: File | undefined;
             
-            if (isMobileDevice && track.storageUrl) {
-              // Use Supabase Storage URL directly on mobile
-              trackUrl = track.storageUrl;
-              console.log(`[loadTracks] Using storageUrl for mobile track ${track.id}: ${trackUrl.substring(0, 50)}...`);
-            } else {
-              if (isMobileDevice) {
-                console.log(`[loadTracks] Track ${track.id} - isMobile: true, but no storageUrl available. Using blob URL instead.`);
-              }
-              // Create blob URL from the blob (desktop or if no storageUrl)
+            // Always create blob URL from fileBlob if available (works on both mobile and desktop)
+            if (track.fileBlob && track.fileBlob.size > 0) {
+              debugLog('info', `loadTracks: Creating blob URL from fileBlob for track ${track.id}, size: ${track.fileBlob.size}`);
               trackUrl = URL.createObjectURL(track.fileBlob);
               
               // Determine MIME type from blob or default to audio/mpeg
@@ -130,6 +125,55 @@ export default function Playlist({
               file = new File([track.fileBlob], track.title + fileExtension, {
                 type: mimeType,
               });
+              
+              debugLog('info', `loadTracks: Blob URL created for track ${track.id}: ${trackUrl.substring(0, 50)}...`);
+            } else if (isMobileDevice && track.storageUrl) {
+              // Fallback: If no fileBlob but we have storageUrl on mobile, download it
+              debugLog('info', `loadTracks: No fileBlob, downloading from storageUrl for track ${track.id}`);
+              try {
+                // Extract path from storageUrl
+                let path = track.storageUrl;
+                if (path.includes('/storage/v1/object/public/')) {
+                  const parts = path.split('/storage/v1/object/public/');
+                  if (parts.length > 1) {
+                    path = parts[1].replace('music-planner/', '');
+                  }
+                }
+                
+                // Download from Supabase Storage
+                const { data: blob, error: downloadError } = await supabase.storage
+                  .from('music-planner')
+                  .download(path);
+                
+                if (downloadError || !blob) {
+                  throw new Error(downloadError?.message || 'No data returned');
+                }
+                
+                debugLog('info', `loadTracks: Downloaded file for track ${track.id}, size: ${blob.size}, type: ${blob.type}`);
+                
+                // Create blob URL from downloaded file
+                trackUrl = URL.createObjectURL(blob);
+                
+                // Create File object
+                const mimeType = blob.type || "audio/mpeg";
+                const fileExtension = mimeType.includes('mpeg') ? '.mp3' : 
+                                     mimeType.includes('wav') ? '.wav' :
+                                     mimeType.includes('ogg') ? '.ogg' :
+                                     mimeType.includes('aac') ? '.aac' : '.mp3';
+                
+                file = new File([blob], track.title + fileExtension, {
+                  type: mimeType,
+                });
+                
+                debugLog('info', `loadTracks: Blob URL created from download for track ${track.id}: ${trackUrl.substring(0, 50)}...`);
+              } catch (downloadError: any) {
+                debugLog('error', `loadTracks: Failed to download track ${track.id}: ${downloadError?.message}`);
+                // Skip this track if download fails
+                continue;
+              }
+            } else {
+              debugLog('warn', `loadTracks: Track ${track.id} has no fileBlob and no storageUrl, skipping`);
+              continue;
             }
             
             tracksWithUrls.push({
@@ -141,9 +185,11 @@ export default function Playlist({
               file,
               storageUrl: track.storageUrl, // Include storageUrl for reference
             });
-          } catch (error) {
+          } catch (error: any) {
+            debugLog('error', `loadTracks: Error processing track ${track.id}: ${error?.message}`);
           }
         } else {
+          debugLog('warn', `loadTracks: Track ${track.id} has no fileBlob`);
         }
       }
 
