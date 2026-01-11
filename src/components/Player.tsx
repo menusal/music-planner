@@ -145,16 +145,25 @@ export default function Player({
   useEffect(() => {
     const handleUserInteraction = () => {
       userInteractedRef.current = true;
+      // Initialize audio context on first user interaction (required for mobile)
+      if (!isAudioInitialized && audioRef.current) {
+        initializeAudio().catch(() => {
+          // AudioContext initialization may fail, that's okay
+        });
+      }
     };
     
-    window.addEventListener('click', handleUserInteraction, { once: true });
-    window.addEventListener('touchstart', handleUserInteraction, { once: true });
+    // Listen to multiple events to catch user interaction
+    window.addEventListener('click', handleUserInteraction, { passive: true });
+    window.addEventListener('touchstart', handleUserInteraction, { passive: true });
+    window.addEventListener('touchend', handleUserInteraction, { passive: true });
     
     return () => {
       window.removeEventListener('click', handleUserInteraction);
       window.removeEventListener('touchstart', handleUserInteraction);
+      window.removeEventListener('touchend', handleUserInteraction);
     };
-  }, []);
+  }, [isAudioInitialized]);
   
   useEffect(() => {
     // Update playing ref when isPlaying changes
@@ -167,18 +176,27 @@ export default function Player({
       prevTrackRef.current = currentTrack;
       
       // Only auto-play if user has interacted or shouldAutoPlay is true
+      // For mobile, we need user interaction to play audio
+      const canAutoPlay = userInteractedRef.current || shouldAutoPlay;
+      
       // Skip if we're in the middle of an automatic track change
-      if (!isAutoChangingRef.current && (userInteractedRef.current || shouldAutoPlay)) {
+      if (!isAutoChangingRef.current && canAutoPlay) {
         isPlayingRef.current = true;
         setIsPlaying(true);
         if (shouldAutoPlay && onAutoPlayHandled) {
           onAutoPlayHandled();
         }
-      } else if (isAutoChangingRef.current) {
-        // If it's an automatic change, set playing state after a delay
+      } else if (isAutoChangingRef.current && canAutoPlay) {
+        // If it's an automatic change and user has interacted, set playing state after a delay
         setTimeout(() => {
           isPlayingRef.current = true;
           setIsPlaying(true);
+          isAutoChangingRef.current = false;
+        }, 200);
+      } else if (isAutoChangingRef.current && !canAutoPlay) {
+        // If it's an automatic change but user hasn't interacted, just reset the flag
+        // Don't auto-play (mobile browsers will block it anyway)
+        setTimeout(() => {
           isAutoChangingRef.current = false;
         }, 200);
       }
@@ -329,12 +347,27 @@ export default function Player({
                 audioRef.current.load();
                 
                 // Auto-play if isPlaying is true and audio is ready (only if URL actually changed)
-                if (isSubscribed && isPlayingRef.current && !playAttemptRef.current) {
+                // Also check if user has interacted (required for mobile autoplay policies)
+                if (isSubscribed && isPlayingRef.current && userInteractedRef.current && !playAttemptRef.current) {
                   // Wait for the audio to be ready
                   const tryPlay = () => {
                     if (audioRef.current && audioRef.current.readyState >= 2 && audioRef.current.paused && !playAttemptRef.current) {
                       playAttemptRef.current = true;
-                      audioRef.current.play().then(() => {
+                      // Resume AudioContext if needed (important for mobile)
+                      const playAudio = () => {
+                        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+                          return audioContextRef.current.resume().then(() => {
+                            if (audioRef.current) {
+                              return audioRef.current.play();
+                            }
+                          });
+                        } else if (audioRef.current) {
+                          return audioRef.current.play();
+                        }
+                        return Promise.resolve();
+                      };
+                      
+                      playAudio().then(() => {
                         playAttemptRef.current = false;
                       }).catch((_playError) => {
                         playAttemptRef.current = false;
@@ -535,6 +568,9 @@ export default function Player({
 
   const togglePlay = async () => {
     try {
+      // Mark user interaction (critical for mobile autoplay policies)
+      userInteractedRef.current = true;
+      
       // Initialize audio on user interaction (play button click)
       if (!isAudioInitialized) {
         await initializeAudio();
@@ -543,6 +579,7 @@ export default function Player({
       // Si no hay currentTrack pero hay playlist, comenzar con la primera canción
       if (!currentTrack && playlist.length > 0) {
         onTrackChange(playlist[0]);
+        isPlayingRef.current = true;
         setIsPlaying(true);
         return;
       }
@@ -558,17 +595,28 @@ export default function Player({
         onTrackChange(trackWithUrl);
       }
       
-      // Ensure audio source is set
-      if (audioRef.current && currentTrack.url) {
-        if (!audioRef.current.src || audioRef.current.src !== currentTrack.url) {
-          audioRef.current.src = currentTrack.url;
-          await audioRef.current.load();
+      // Resume audio context if suspended (required for user interaction, especially on mobile)
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        try {
+          await audioContextRef.current.resume();
+        } catch (_error) {
+          // AudioContext resume may fail, try to continue anyway
         }
       }
       
-      // Resume audio context if suspended (required for user interaction)
-      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
+      // Ensure audio source is set
+      if (audioRef.current && currentTrack.url) {
+        // For blob URLs on mobile, recreate if we have the file
+        if (currentTrack.url.startsWith('blob:') && currentTrack.file) {
+          if (audioRef.current.src && audioRef.current.src.startsWith('blob:')) {
+            URL.revokeObjectURL(audioRef.current.src);
+          }
+          const newBlobUrl = URL.createObjectURL(currentTrack.file);
+          audioRef.current.src = newBlobUrl;
+        } else if (!audioRef.current.src || audioRef.current.src !== currentTrack.url) {
+          audioRef.current.src = currentTrack.url;
+        }
+        await audioRef.current.load();
       }
       
       // Toggle play/pause
@@ -576,20 +624,34 @@ export default function Player({
         if (audioRef.current && !audioRef.current.paused) {
           audioRef.current.pause();
         }
+        isPlayingRef.current = false;
         setIsPlaying(false);
       } else {
+        isPlayingRef.current = true;
         setIsPlaying(true);
-        // Try to play immediately
-        if (audioRef.current && audioRef.current.readyState >= 2) {
-          try {
-            await audioRef.current.play();
-          } catch (playError) {
-            // Play will be handled by the useEffect
+        // Try to play immediately - wait for audio to be ready
+        const tryPlay = async () => {
+          if (audioRef.current) {
+            if (audioRef.current.readyState >= 2) {
+              try {
+                await audioRef.current.play();
+              } catch (playError) {
+                // Play failed, reset state
+                isPlayingRef.current = false;
+                setIsPlaying(false);
+              }
+            } else {
+              // Audio not ready yet, wait a bit more
+              setTimeout(tryPlay, 50);
+            }
           }
-        }
+        };
+        await tryPlay();
       }
-    } catch (error) {
+    } catch (_error) {
       // Error handled
+      isPlayingRef.current = false;
+      setIsPlaying(false);
     }
   };
 
