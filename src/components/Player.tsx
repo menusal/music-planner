@@ -171,21 +171,22 @@ export default function Player({
             try {
               // Test if URL is valid
               if (trackUrl.startsWith('blob:') || trackUrl.startsWith('http://') || trackUrl.startsWith('https://')) {
-                // For blob URLs, ensure we have the file to recreate if needed
+                // For blob URLs, always recreate if we have the file (especially important on mobile)
                 if (trackUrl.startsWith('blob:') && currentTrack?.file) {
-                  // Recreate blob URL to ensure it's fresh and valid
+                  // Recreate blob URL to ensure it's fresh and valid (especially important on mobile)
                   // Revoke old URL if it exists
                   if (audioRef.current.src && audioRef.current.src.startsWith('blob:')) {
                     URL.revokeObjectURL(audioRef.current.src);
                   }
                   const newBlobUrl = URL.createObjectURL(currentTrack.file);
                   audioRef.current.src = newBlobUrl;
-                } else {
-                  // Set the audio source directly
-                  if (!audioRef.current.src || audioRef.current.src !== trackUrl) {
-                    audioRef.current.src = trackUrl;
+                  // MIME type is handled by the File/blob object, no need to set on audio element
+                  } else {
+                    // Set the audio source directly for HTTP/HTTPS URLs
+                    if (!audioRef.current.src || audioRef.current.src !== trackUrl) {
+                      audioRef.current.src = trackUrl;
+                    }
                   }
-                }
                 
                 // Add error handler for audio loading
                 const handleAudioError = (_e: Event) => {
@@ -195,10 +196,51 @@ export default function Player({
                   // Log error details for debugging
                   if (audioRef.current?.error) {
                     const error = audioRef.current.error;
-                    // Create a user-visible error message
-                    const errorMessage = `Audio error: ${error.code} - ${error.message || 'Unknown error'}`;
-                    // Show error to user (you can replace this with a toast notification)
-                    alert(errorMessage);
+                    let errorMessage = 'Unknown audio error';
+                    
+                    // Map error codes to user-friendly messages
+                    switch (error.code) {
+                      case MediaError.MEDIA_ERR_ABORTED:
+                        errorMessage = 'Audio playback was aborted';
+                        break;
+                      case MediaError.MEDIA_ERR_NETWORK:
+                        errorMessage = 'Network error while loading audio';
+                        break;
+                      case MediaError.MEDIA_ERR_DECODE:
+                        errorMessage = 'Audio decoding error - file may be corrupted';
+                        break;
+                      case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                        errorMessage = 'Audio format not supported on this device';
+                        break;
+                      default:
+                        errorMessage = `Audio error (code ${error.code}): ${error.message || 'Unknown error'}`;
+                    }
+                    
+                    // On mobile or for blob URLs, try to recreate blob URL with proper MIME type
+                    if (currentTrack?.file && trackUrl.startsWith('blob:')) {
+                      try {
+                        // Revoke old blob URL
+                        URL.revokeObjectURL(trackUrl);
+                        // Create new blob URL (MIME type is handled by the File object)
+                        const newBlobUrl = URL.createObjectURL(currentTrack.file);
+                        audioRef.current.src = newBlobUrl;
+                        audioRef.current.load();
+                        // Try playing again after a short delay
+                        setTimeout(() => {
+                          if (isSubscribed && isPlaying && audioRef.current) {
+                            audioRef.current.play().catch(() => {
+                              alert(errorMessage + '\n\nPlease try selecting the track again.');
+                            });
+                          }
+                        }, 200);
+                        return; // Don't show error if we're retrying
+                      } catch (retryError) {
+                        // If retry fails, show error
+                      }
+                    }
+                    
+                    // Show error to user
+                    alert(errorMessage + '\n\nIf this persists, try refreshing the page or re-uploading the track.');
                   }
                 };
                 

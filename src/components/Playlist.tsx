@@ -95,14 +95,30 @@ export default function Playlist({
       for (const track of savedTracks) {
         if (track.fileBlob) {
           try {
+            // Create blob URL
+            const blobUrl = URL.createObjectURL(track.fileBlob);
+            
+            // Determine MIME type from blob or default to audio/mpeg
+            let mimeType = track.fileBlob.type || "audio/mpeg";
+            // Ensure we have a valid audio MIME type
+            if (!mimeType.startsWith('audio/')) {
+              mimeType = "audio/mpeg";
+            }
+            
+            // Create File object with proper MIME type for mobile compatibility
+            const fileExtension = mimeType.includes('mpeg') ? '.mp3' : 
+                                 mimeType.includes('wav') ? '.wav' :
+                                 mimeType.includes('ogg') ? '.ogg' :
+                                 mimeType.includes('aac') ? '.aac' : '.mp3';
+            
             tracksWithUrls.push({
               id: track.id,
               title: track.title,
               duration: track.duration,
               artist: track.artist,
-              url: URL.createObjectURL(track.fileBlob),
-              file: new File([track.fileBlob], track.title + ".mp3", {
-                type: "audio/mpeg",
+              url: blobUrl,
+              file: new File([track.fileBlob], track.title + fileExtension, {
+                type: mimeType,
               }),
             });
           } catch (error) {
