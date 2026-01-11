@@ -343,15 +343,54 @@ export default function Player({
                 
                 // Add loadedmetadata handler
                 const handleLoadedMetadata = () => {
-                  // Audio metadata is loaded, we can check duration
+                  debugLog('info', `loadedmetadata event - readyState: ${audioRef.current?.readyState}, duration: ${audioRef.current?.duration}`);
                 };
                 
+                // Add loadstart handler
+                const handleLoadStart = () => {
+                  debugLog('info', 'loadstart event - Audio loading started');
+                };
+                
+                // Add progress handler
+                const handleProgress = () => {
+                  if (audioRef.current) {
+                    const buffered = audioRef.current.buffered;
+                    const bufferedLength = buffered && buffered.length > 0 ? buffered.end(0) : 0;
+                    debugLog('info', `progress event - readyState: ${audioRef.current.readyState}, buffered: ${bufferedLength}`);
+                  }
+                };
+                
+                // Add stalled handler (when loading stops)
+                const handleStalled = () => {
+                  debugLog('warn', 'stalled event - Audio loading stalled');
+                };
+                
+                // Add suspend handler
+                const handleSuspend = () => {
+                  debugLog('warn', 'suspend event - Audio loading suspended');
+                };
+                
+                // Add abort handler
+                const handleAbort = () => {
+                  debugLog('warn', 'abort event - Audio loading aborted');
+                };
+                
+                // Add all event listeners
                 audioRef.current.addEventListener('error', handleAudioError, { once: true });
                 audioRef.current.addEventListener('canplay', handleCanPlay, { once: true });
                 audioRef.current.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+                audioRef.current.addEventListener('loadstart', handleLoadStart, { once: true });
+                audioRef.current.addEventListener('progress', handleProgress);
+                audioRef.current.addEventListener('stalled', handleStalled, { once: true });
+                audioRef.current.addEventListener('suspend', handleSuspend, { once: true });
+                audioRef.current.addEventListener('abort', handleAbort, { once: true });
+                
+                // Log the source URL before loading
+                debugLog('info', `About to load audio - src: ${audioRef.current.src.substring(0, 100)}...`);
                 
                 // Load the audio source
                 audioRef.current.load();
+                debugLog('info', `load() called - readyState after load: ${audioRef.current.readyState}`);
                 
                 // Auto-play if isPlaying is true and audio is ready (only if URL actually changed)
                 // Also check if user has interacted (required for mobile autoplay policies)
@@ -677,11 +716,27 @@ export default function Player({
         setIsPlaying(true);
         
         // Try to play immediately - wait for audio to be ready
+        let tryPlayAttempts = 0;
+        const MAX_ATTEMPTS = 40; // Max 2 seconds of waiting (40 * 50ms)
+        
         const tryPlay = async () => {
           if (audioRef.current) {
             const readyState = audioRef.current.readyState;
             const paused = audioRef.current.paused;
-            debugLog('info', `tryPlay - readyState: ${readyState}, paused: ${paused}, hasSrc: ${!!audioRef.current.src}`);
+            const hasSrc = !!audioRef.current.src;
+            const src = audioRef.current.src;
+            
+            tryPlayAttempts++;
+            debugLog('info', `tryPlay attempt ${tryPlayAttempts}/${MAX_ATTEMPTS} - readyState: ${readyState}, paused: ${paused}, hasSrc: ${hasSrc}, src: ${src ? src.substring(0, 50) + '...' : 'none'}`);
+            
+            // Check if there's an error
+            if (audioRef.current.error) {
+              const error = audioRef.current.error;
+              debugLog('error', `Audio has error - code: ${error.code}, message: ${error.message}`);
+              isPlayingRef.current = false;
+              setIsPlaying(false);
+              return;
+            }
             
             if (readyState >= 2) {
               try {
@@ -714,10 +769,15 @@ export default function Player({
                 isPlayingRef.current = false;
                 setIsPlaying(false);
               }
-            } else {
+            } else if (tryPlayAttempts < MAX_ATTEMPTS) {
               debugLog('info', `Audio not ready (readyState: ${readyState}), waiting...`);
               // Audio not ready yet, wait a bit more
               setTimeout(tryPlay, 50);
+            } else {
+              debugLog('error', `Audio never became ready after ${MAX_ATTEMPTS} attempts. readyState stuck at ${readyState}`);
+              // Give up after max attempts
+              isPlayingRef.current = false;
+              setIsPlaying(false);
             }
           } else {
             debugLog('warn', 'audioRef.current is null in tryPlay');
